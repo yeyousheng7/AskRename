@@ -25,14 +25,14 @@ function DiffRemovedText({
           return (
             <span
               key={index}
-              className="bg-red-50 text-red-600 line-through decoration-red-300 dark:bg-red-950/30 dark:text-red-400"
+              className="bg-red-100 text-red-600 line-through decoration-red-300 dark:bg-red-950/50 dark:text-red-400"
             >
               {part.value}
             </span>
           );
         }
         return (
-          <span key={index} className="text-slate-600 dark:text-slate-400">
+          <span key={index} className="text-zinc-600 dark:text-zinc-400">
             {part.value}
           </span>
         );
@@ -54,7 +54,7 @@ function DiffAddedText({
 
   return (
     <div
-      className={`${textStyles} min-h-6 cursor-text text-slate-800 dark:text-slate-200`}
+      className={`${textStyles} min-h-6 cursor-text text-zinc-800 dark:text-zinc-200`}
       onClick={onClick}
     >
       {parts.map((part, index) => {
@@ -65,7 +65,7 @@ function DiffAddedText({
           return (
             <span
               key={index}
-              className="bg-emerald-50 text-emerald-600 dark:bg-emerald-950/30 dark:text-emerald-400"
+              className="bg-emerald-100 text-emerald-600 dark:bg-emerald-950/50 dark:text-emerald-400"
             >
               {part.value}
             </span>
@@ -74,7 +74,7 @@ function DiffAddedText({
         return <span key={index}>{part.value}</span>;
       })}
       {renamed.length === 0 && (
-        <span className="text-slate-300 dark:text-slate-600 italic">点击编辑...</span>
+        <span className="text-zinc-300 dark:text-zinc-600 italic">点击编辑...</span>
       )}
     </div>
   );
@@ -158,41 +158,42 @@ export default function EditorRow({
 
   return (
     <div
-      className={`grid grid-cols-[3rem_1fr_3rem_1fr] border-b border-slate-100 dark:border-slate-800 transition-colors ${isHovered ? 'bg-blue-50/80 dark:bg-blue-900/20' : ''}`}
+      className={`grid grid-cols-[3rem_1fr_3rem_1fr] border-b border-zinc-100 dark:border-zinc-800 transition-colors ${isHovered ? 'bg-blue-50/80 dark:bg-blue-950/20' : ''
+        }`}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
-      <div className="flex items-start justify-end border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 pr-3 py-1.5">
-        <span className="font-mono text-xs text-slate-400 dark:text-slate-500 select-none leading-6">
+      <div className="flex items-start justify-end border-r border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 pr-3 py-1.5">
+        <span className="font-mono text-xs text-zinc-400 dark:text-zinc-500 select-none leading-6">
           {index + 1}
         </span>
       </div>
 
-      <div className="border-r border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/50 px-3 py-1.5">
+      <div className="border-r border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/50 px-3 py-1.5">
         <DiffRemovedText original={file.original} renamed={file.renamed} />
       </div>
 
       {/* 中间列：行号 / 重置按钮 */}
-      <div className="flex items-start justify-center border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 py-1.5">
+      <div className="flex items-start justify-center border-r border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 py-1.5">
         {hasChange && onRevert ? (
           <button
             onClick={handleRevert}
-            className="p-1 rounded text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors cursor-pointer"
+            className="p-1 rounded text-zinc-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-950/30 transition-colors cursor-pointer"
             title="还原为原始文件名"
           >
             <Undo2 className="h-4 w-4" />
           </button>
         ) : (
-          <span className="font-mono text-xs text-slate-400 dark:text-slate-500 select-none leading-6">
+          <span className="font-mono text-xs text-zinc-400 dark:text-zinc-500 select-none leading-6">
             {index + 1}
           </span>
         )}
       </div>
 
-      <div className="px-3 py-1.5 bg-white dark:bg-slate-950">
+      <div className="px-3 py-1.5 bg-white dark:bg-zinc-950">
         {isLoading ? (
           <div className="flex items-center h-6">
-            <div className="h-4 bg-gradient-to-r from-slate-200 via-slate-100 to-slate-200 dark:from-slate-700 dark:via-slate-600 dark:to-slate-700 rounded animate-pulse w-3/4" />
+            <div className="h-4 bg-gradient-to-r from-zinc-200 via-zinc-100 to-zinc-200 dark:from-zinc-700 dark:via-zinc-600 dark:to-zinc-700 rounded animate-pulse w-3/4" />
           </div>
         ) : editingIndex === index ? (
           <TextareaAutosize
@@ -201,7 +202,7 @@ export default function EditorRow({
             onKeyDown={handleKeyDown}
             onBlur={stopEditing}
             autoFocus
-            className={`w-full bg-transparent resize-none focus:outline-none ${textStyles} text-slate-800 dark:text-slate-200`}
+            className={`w-full bg-transparent resize-none focus:outline-none ${textStyles} text-zinc-800 dark:text-zinc-200`}
             minRows={1}
           />
         ) : (

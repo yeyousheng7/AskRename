@@ -10,9 +10,12 @@ import {
   CheckIcon,
   XIcon,
   Undo2Icon,
-  WandIcon
+  WandIcon,
+  SunIcon,
+  MoonIcon
 } from 'lucide-react';
 import { useFileStore } from '@/hooks/useFileStore';
+import { useTheme } from '@/hooks/useTheme';
 import EditorRow from '@/components/EditorRow';
 import { QUICK_ACTIONS, type QuickAction } from '@/lib/constants';
 
@@ -60,15 +63,15 @@ function Toast({ message, type, onClose, action }: ToastProps): React.JSX.Elemen
 function EmptyState(): React.JSX.Element {
   return (
     <div className="flex flex-1 items-center justify-center">
-      <div className="flex flex-col items-center gap-4 text-slate-400 dark:text-slate-500">
-        <div className="rounded-full bg-slate-100 dark:bg-slate-800 p-6">
+      <div className="flex flex-col items-center gap-4 text-zinc-400 dark:text-zinc-500">
+        <div className="rounded-full bg-zinc-100 dark:bg-zinc-800 p-6">
           <UploadIcon className="h-12 w-12" />
         </div>
         <div className="text-center">
-          <p className="text-lg font-medium text-slate-500 dark:text-slate-400">
+          <p className="text-lg font-medium text-zinc-500 dark:text-zinc-400">
             拖入文件以开始重命名
           </p>
-          <p className="mt-1 text-sm text-slate-400 dark:text-slate-500">支持批量拖入多个文件</p>
+          <p className="mt-1 text-sm text-zinc-400 dark:text-zinc-500">支持批量拖入多个文件</p>
         </div>
       </div>
     </div>
@@ -94,8 +97,12 @@ function QuickActionsMenu({
 }: QuickActionsMenuProps): React.JSX.Element | null {
   if (!isOpen) return null;
 
-  const ruleActions = QUICK_ACTIONS.filter((a): a is Extract<QuickAction, { type: 'rule' }> => a.type === 'rule');
-  const aiActions = QUICK_ACTIONS.filter((a): a is Extract<QuickAction, { type: 'ai' }> => a.type === 'ai');
+  const ruleActions = QUICK_ACTIONS.filter(
+    (a): a is Extract<QuickAction, { type: 'rule' }> => a.type === 'rule'
+  );
+  const aiActions = QUICK_ACTIONS.filter(
+    (a): a is Extract<QuickAction, { type: 'ai' }> => a.type === 'ai'
+  );
 
   const handleClick = (action: QuickAction) => {
     if (action.type === 'rule') {
@@ -112,10 +119,10 @@ function QuickActionsMenu({
       <div className="fixed inset-0 z-40" onClick={onClose} />
 
       {/* 菜单面板 */}
-      <div className="absolute bottom-full left-0 mb-2 z-50 w-56 bg-white dark:bg-slate-900 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 py-1 animate-in fade-in-0 zoom-in-95 slide-in-from-bottom-2">
+      <div className="absolute bottom-full left-0 mb-2 z-50 w-56 bg-white dark:bg-zinc-900 rounded-lg shadow-lg border border-zinc-200 dark:border-zinc-800 py-1 animate-in fade-in-0 zoom-in-95 slide-in-from-bottom-2">
         {/* 规则类 */}
         <div className="px-2 py-1.5">
-          <span className="text-xs font-medium text-slate-400 dark:text-slate-500 uppercase tracking-wide">
+          <span className="text-xs font-medium text-zinc-400 dark:text-zinc-500 uppercase tracking-wide">
             规则转换
           </span>
         </div>
@@ -123,19 +130,19 @@ function QuickActionsMenu({
           <button
             key={action.label}
             onClick={() => handleClick(action)}
-            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
           >
-            <action.icon className="h-4 w-4 text-slate-400" />
+            <action.icon className="h-4 w-4 text-zinc-400" />
             {action.label}
           </button>
         ))}
 
         {/* 分割线 */}
-        <div className="my-1 border-t border-slate-200 dark:border-slate-700" />
+        <div className="my-1 border-t border-zinc-200 dark:border-zinc-800" />
 
         {/* AI 类 */}
         <div className="px-2 py-1.5">
-          <span className="text-xs font-medium text-slate-400 dark:text-slate-500 uppercase tracking-wide">
+          <span className="text-xs font-medium text-zinc-400 dark:text-zinc-500 uppercase tracking-wide">
             AI 智能
           </span>
         </div>
@@ -143,7 +150,7 @@ function QuickActionsMenu({
           <button
             key={action.label}
             onClick={() => handleClick(action)}
-            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
           >
             <action.icon className="h-4 w-4 text-purple-500" />
             {action.label}
@@ -170,6 +177,8 @@ function App(): React.JSX.Element {
   const [isQuickActionsOpen, setIsQuickActionsOpen] = useState(false);
 
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const { resolvedTheme, toggleTheme } = useTheme();
 
   const {
     files,
@@ -330,7 +339,8 @@ function App(): React.JSX.Element {
 
   return (
     <div
-      className={`flex h-screen w-screen flex-col bg-white dark:bg-slate-950 transition-colors ${isDragging ? 'bg-blue-50/50 dark:bg-blue-950/20' : ''}`}
+      className={`flex h-screen w-screen flex-col bg-white dark:bg-zinc-950 transition-colors ${isDragging ? 'bg-blue-50/50 dark:bg-blue-950/20' : ''
+        }`}
       onDrop={(e) => {
         setIsDragging(false);
         handleDrop(e);
@@ -360,21 +370,21 @@ function App(): React.JSX.Element {
       )}
 
       {/* 表头 */}
-      <div className="flex-shrink-0 grid grid-cols-[3rem_1fr_3rem_1fr] border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900">
-        <div className="h-8 border-r border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800" />
-        <div className="flex h-8 items-center border-r border-slate-200 dark:border-slate-700 px-3">
-          <span className="font-mono text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+      <div className="flex-shrink-0 grid grid-cols-[3rem_1fr_3rem_1fr_auto] border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900">
+        <div className="h-8 border-r border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-800" />
+        <div className="flex h-8 items-center border-r border-zinc-200 dark:border-zinc-800 px-3">
+          <span className="font-mono text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
             原始文本
           </span>
           {!isEmpty && (
-            <span className="ml-2 font-mono text-xs text-slate-400 dark:text-slate-500">
+            <span className="ml-2 font-mono text-xs text-zinc-400 dark:text-zinc-500">
               ({files.length})
             </span>
           )}
         </div>
-        <div className="h-8 border-r border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800" />
+        <div className="h-8 border-r border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-800" />
         <div className="flex h-8 items-center px-3">
-          <span className="font-mono text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+          <span className="font-mono text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
             预览文本
           </span>
           {isRenaming ? (
@@ -385,10 +395,24 @@ function App(): React.JSX.Element {
           ) : hasChanges ? (
             <span className="ml-2 font-mono text-xs text-emerald-500">(待审查)</span>
           ) : (
-            <span className="ml-2 font-mono text-xs text-slate-400 dark:text-slate-500">
+            <span className="ml-2 font-mono text-xs text-zinc-400 dark:text-zinc-500">
               (点击编辑)
             </span>
           )}
+        </div>
+        {/* 主题切换按钮 */}
+        <div className="flex items-center px-2 bg-zinc-50 dark:bg-zinc-900">
+          <button
+            onClick={toggleTheme}
+            className="p-1.5 rounded-md text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors"
+            title={resolvedTheme === 'dark' ? '切换到浅色模式' : '切换到深色模式'}
+          >
+            {resolvedTheme === 'dark' ? (
+              <SunIcon className="h-4 w-4" />
+            ) : (
+              <MoonIcon className="h-4 w-4" />
+            )}
+          </button>
         </div>
       </div>
 
@@ -416,7 +440,7 @@ function App(): React.JSX.Element {
       )}
 
       {/* 底部操作栏 */}
-      <footer className="flex-shrink-0 border-t border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-sm p-3">
+      <footer className="flex-shrink-0 border-t border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-sm p-3">
         {error && (
           <div className="mb-2 text-sm text-red-500 bg-red-50 dark:bg-red-950/30 px-3 py-1.5 rounded">
             {error}
@@ -470,7 +494,7 @@ function App(): React.JSX.Element {
             value={instruction}
             onChange={(e) => setInstruction(e.target.value)}
             onKeyDown={handleKeyDown}
-            className="flex-1 h-9 font-mono text-sm bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-600 focus:border-blue-400 focus:ring-blue-400/20"
+            className="flex-1 h-9 font-mono text-sm bg-zinc-50 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 focus:border-blue-400 focus:ring-blue-400/20 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500"
             disabled={isEmpty || isRenaming || isApplying || isUndoing}
           />
 
@@ -493,7 +517,7 @@ function App(): React.JSX.Element {
               <Button
                 onClick={handleApply}
                 size="default"
-                className="h-9 px-5 text-sm font-medium bg-slate-900 hover:bg-slate-800 text-white dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100"
+                className="h-9 px-5 text-sm font-medium bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
                 disabled={isApplying || isUndoing}
               >
                 {isApplying ? (

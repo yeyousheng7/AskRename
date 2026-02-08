@@ -1,6 +1,9 @@
 @import './base.css';
 @import 'tailwindcss';
 
+/* Tailwind v4 dark mode: use `.dark` class instead of media query */
+@custom-variant dark (&:where(.dark, .dark *));
+
 /* shadcn/ui CSS Variables */
 @theme inline {
   --color-background: hsl(0 0% 100%);
