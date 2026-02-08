@@ -20,8 +20,27 @@ interface AIChatResponse {
   error?: string;
 }
 
+// 文件重命名类型定义
+interface RenameFileItem {
+  oldPath: string;
+  newName?: string;
+  newPath?: string;
+}
+
+interface RenameError {
+  path: string;
+  error: string;
+}
+
+interface RenameResult {
+  successCount: number;
+  errors: RenameError[];
+}
+
 interface CustomAPI {
+  getPathForFile: (file: File) => string;
   askAI: (settings: AISettings, messages: ChatMessage[]) => Promise<AIChatResponse>;
+  applyRename: (files: RenameFileItem[]) => Promise<RenameResult>;
 }
 
 declare global {

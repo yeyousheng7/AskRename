@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import { electronAPI } from '@electron-toolkit/preload';
 
 // ============================================================================
@@ -25,10 +25,48 @@ interface AIChatResponse {
 }
 
 // ============================================================================
+// 文件重命名类型定义
+// ============================================================================
+
+interface RenameFileItem {
+  oldPath: string;
+  newName?: string;
+  newPath?: string;
+}
+
+interface RenameError {
+  path: string;
+  error: string;
+}
+
+interface RenameResult {
+  successCount: number;
+  errors: RenameError[];
+}
+
+// ============================================================================
 // Custom APIs for renderer
 // ============================================================================
 
 const api = {
+  /**
+   * 从 File 对象获取真实绝对路径（Electron 推荐方式）
+   * 说明：在较新的 Electron 版本中，renderer 侧的 `file.path` 可能为空。
+   */
+  getPathForFile: (file: File): string => {
+    try {
+      if (webUtils && typeof webUtils.getPathForFile === 'function') {
+        return webUtils.getPathForFile(file);
+      }
+    } catch {
+      // ignore and fall back
+    }
+
+    // fallback（旧版本 Electron 可能仍有非标准属性）
+    const legacy = file as unknown as { path?: string };
+    return legacy.path || '';
+  },
+
   /**
    * 调用 AI Chat API
    * @param settings - AI 服务配置
@@ -37,6 +75,15 @@ const api = {
    */
   askAI: (settings: AISettings, messages: ChatMessage[]): Promise<AIChatResponse> => {
     return ipcRenderer.invoke('ai:chat', { settings, messages });
+  },
+
+  /**
+   * 应用文件重命名
+   * @param files - 要重命名的文件列表
+   * @returns 重命名结果
+   */
+  applyRename: (files: RenameFileItem[]): Promise<RenameResult> => {
+    return ipcRenderer.invoke('app:rename-files', files);
   }
 };
 
