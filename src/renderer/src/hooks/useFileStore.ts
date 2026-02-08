@@ -85,6 +85,7 @@ export type UseFileStoreResult = {
   batchUpdateFileNames: (newNames: string[]) => void;
   clearFiles: () => void;
   discardChanges: () => void;
+  revertFileName: (index: number) => void;
   handleDrop: (e: DragEvent<HTMLDivElement>) => void;
   startRenaming: (instruction: string) => Promise<void>;
   stopRenaming: () => void;
@@ -140,6 +141,15 @@ export function useFileStore(): UseFileStoreResult {
         ...file,
         renamed: file.original
       }))
+    );
+  }, []);
+
+  // 单行重置：将指定索引的文件 renamed 重置为 original
+  const revertFileName = useCallback((index: number) => {
+    setFiles((prev) =>
+      prev.map((file, i) =>
+        i === index ? { ...file, renamed: file.original } : file
+      )
     );
   }, []);
 
@@ -366,6 +376,7 @@ export function useFileStore(): UseFileStoreResult {
     batchUpdateFileNames,
     clearFiles,
     discardChanges,
+    revertFileName,
     handleDrop,
     startRenaming,
     stopRenaming,

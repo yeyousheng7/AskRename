@@ -95,6 +95,7 @@ function App(): React.JSX.Element {
     canUndo,
     updateFileName,
     discardChanges,
+    revertFileName,
     handleDrop,
     startRenaming,
     stopRenaming,
@@ -303,6 +304,7 @@ function App(): React.JSX.Element {
                 editingIndex={editingIndex}
                 setEditingIndex={setEditingIndex}
                 onRename={updateFileName}
+                onRevert={revertFileName}
                 isLoading={isRenaming}
               />
             ))}

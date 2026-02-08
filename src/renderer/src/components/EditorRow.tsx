@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState, type KeyboardEvent } from 'react';
 import { diffChars } from 'diff';
 import TextareaAutosize from 'react-textarea-autosize';
+import { Undo2 } from 'lucide-react';
 import type { FileItem } from '@/types/file';
 
 const textStyles = 'font-mono text-sm leading-6';
@@ -73,7 +74,7 @@ function DiffAddedText({
         return <span key={index}>{part.value}</span>;
       })}
       {renamed.length === 0 && (
-        <span className="text-slate-300 dark:text-slate-600 italic">鐐瑰嚮缂栬緫...</span>
+        <span className="text-slate-300 dark:text-slate-600 italic">点击编辑...</span>
       )}
     </div>
   );
@@ -86,6 +87,7 @@ export type EditorRowProps = {
   editingIndex: number | null;
   setEditingIndex: (next: number | null) => void;
   onRename: (id: string, newName: string) => void;
+  onRevert?: (index: number) => void;
   isLoading?: boolean;
 };
 
@@ -96,9 +98,13 @@ export default function EditorRow({
   editingIndex,
   setEditingIndex,
   onRename,
+  onRevert,
   isLoading = false
 }: EditorRowProps): React.JSX.Element {
   const [isHovered, setIsHovered] = useState(false);
+
+  // 检查该行是否有修改
+  const hasChange = file.original !== file.renamed;
 
   const stopEditing = useCallback(() => {
     setEditingIndex(null);
@@ -144,6 +150,12 @@ export default function EditorRow({
     [filesLength, index, setEditingIndex, stopEditing]
   );
 
+  const handleRevert = useCallback(() => {
+    if (onRevert) {
+      onRevert(index);
+    }
+  }, [onRevert, index]);
+
   return (
     <div
       className={`grid grid-cols-[3rem_1fr_3rem_1fr] border-b border-slate-100 dark:border-slate-800 transition-colors ${isHovered ? 'bg-blue-50/80 dark:bg-blue-900/20' : ''}`}
@@ -160,10 +172,21 @@ export default function EditorRow({
         <DiffRemovedText original={file.original} renamed={file.renamed} />
       </div>
 
-      <div className="flex items-start justify-end border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 pr-3 py-1.5">
-        <span className="font-mono text-xs text-slate-400 dark:text-slate-500 select-none leading-6">
-          {index + 1}
-        </span>
+      {/* 中间列：行号 / 重置按钮 */}
+      <div className="flex items-start justify-center border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 py-1.5">
+        {hasChange && onRevert ? (
+          <button
+            onClick={handleRevert}
+            className="p-1 rounded text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors cursor-pointer"
+            title="还原为原始文件名"
+          >
+            <Undo2 className="h-4 w-4" />
+          </button>
+        ) : (
+          <span className="font-mono text-xs text-slate-400 dark:text-slate-500 select-none leading-6">
+            {index + 1}
+          </span>
+        )}
       </div>
 
       <div className="px-3 py-1.5 bg-white dark:bg-slate-950">
