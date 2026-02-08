@@ -1,6 +1,6 @@
 /**
  * AI 重命名服务
- * 支持 OpenAI、DeepSeek 等兼容 API 的厂商
+ * 通过 IPC 调用主进程 API，绕过 CORS/CSP 限制
  */
 
 // ============================================================================
@@ -23,14 +23,6 @@ export interface AIServiceConfig {
 interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
-}
-
-interface ChatCompletionResponse {
-  choices: {
-    message: {
-      content: string | null;
-    };
-  }[];
 }
 
 // ============================================================================
@@ -122,7 +114,7 @@ export function getSupportedProviders(): { id: AIProvider; name: string }[] {
 }
 
 // ============================================================================
-// 核心 API
+// 核心 API（通过 IPC 调用主进程）
 // ============================================================================
 
 /**
@@ -161,49 +153,21 @@ export async function generateNewNames(
     { role: 'user', content: userMessage }
   ];
 
-  // 构建请求体
-  const requestBody: Record<string, unknown> = {
-    model,
-    messages,
-    temperature: 0.3,
-    max_tokens: maxTokens
-  };
+  // 通过 IPC 调用主进程
+  const response = await window.api.askAI(
+    { apiKey, baseURL, model, jsonMode, maxTokens },
+    messages
+  );
 
-  // DeepSeek / OpenAI JSON 模式
-  if (jsonMode) {
-    requestBody.response_format = { type: 'json_object' };
+  if (!response.success) {
+    throw new Error(response.error || 'AI 服务发生未知错误');
   }
 
-  try {
-    const response = await fetch(`${baseURL}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`
-      },
-      body: JSON.stringify(requestBody)
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`API 请求失败: ${response.status} - ${errorText}`);
-    }
-
-    const data: ChatCompletionResponse = await response.json();
-    const content = data.choices?.[0]?.message?.content;
-
-    // DeepSeek JSON 模式有时会返回空 content
-    if (!content) {
-      throw new Error('AI 返回内容为空，请尝试修改指令后重试');
-    }
-
-    return parseAndValidateResponse(content, files.length);
-  } catch (error) {
-    if (error instanceof Error) {
-      throw error;
-    }
-    throw new Error('AI 服务发生未知错误，请重试');
+  if (!response.content) {
+    throw new Error('AI 返回内容为空，请尝试修改指令后重试');
   }
+
+  return parseAndValidateResponse(response.content, files.length);
 }
 
 // ============================================================================
