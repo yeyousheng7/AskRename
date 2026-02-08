@@ -5,7 +5,7 @@ import { generateNewNames, getConfigFromEnv } from '@/lib/ai-service';
 function isAbsolutePathLike(p: string): boolean {
   if (!p) return false;
   // Windows: C:\ or C:/, or UNC \\server\share
-  if (/^[a-zA-Z]:[\\/]/.test(p) || /^\\\\/.test(p)) return true;
+  if (/^[a-zA-Z]:[\\\/]/.test(p) || /^\\\\/.test(p)) return true;
   // POSIX: /home/...
   return p.startsWith('/');
 }
@@ -64,16 +64,27 @@ function getElectronFilePath(file: File): string {
 
 type RenamedItem = { oldPath: string; newPath: string };
 
+// 历史记录项：用于撤销操作
+export type HistoryItem = {
+  /** 操作时间戳 */
+  timestamp: number;
+  /** 反向操作列表（撤销时执行） */
+  undoItems: RenamedItem[];
+};
+
 // Hook 返回类型
 export type UseFileStoreResult = {
   files: FileItem[];
   isRenaming: boolean;
   isApplying: boolean;
+  isUndoing: boolean;
   hasChanges: boolean;
+  canUndo: boolean;
   addFiles: (newFiles: FileItem[]) => void;
   updateFileName: (id: string, newName: string) => void;
   batchUpdateFileNames: (newNames: string[]) => void;
   clearFiles: () => void;
+  discardChanges: () => void;
   handleDrop: (e: DragEvent<HTMLDivElement>) => void;
   startRenaming: (instruction: string) => Promise<void>;
   stopRenaming: () => void;
@@ -83,16 +94,22 @@ export type UseFileStoreResult = {
     renamed?: RenamedItem[];
   }>;
   resetAfterApply: (renamed?: RenamedItem[]) => void;
+  undo: () => Promise<{ success: boolean; error?: string }>;
 };
 
 export function useFileStore(): UseFileStoreResult {
   const [files, setFiles] = useState<FileItem[]>([]);
   const [isRenaming, setIsRenaming] = useState(false);
   const [isApplying, setIsApplying] = useState(false);
+  const [isUndoing, setIsUndoing] = useState(false);
+  const [history, setHistory] = useState<HistoryItem[]>([]);
   const abortControllerRef = useRef<AbortController | null>(null);
 
   // 检查是否有未应用的更改
   const hasChanges = files.some((file) => file.original !== file.renamed);
+
+  // 检查是否可以撤销
+  const canUndo = history.length > 0;
 
   const addFiles = useCallback((newFiles: FileItem[]) => {
     if (newFiles.length === 0) return;
@@ -114,6 +131,16 @@ export function useFileStore(): UseFileStoreResult {
 
   const clearFiles = useCallback(() => {
     setFiles([]);
+  }, []);
+
+  // 放弃更改：将所有 renamed 重置为 original
+  const discardChanges = useCallback(() => {
+    setFiles((prev) =>
+      prev.map((file) => ({
+        ...file,
+        renamed: file.original
+      }))
+    );
   }, []);
 
   const handleDrop = useCallback(
@@ -229,6 +256,24 @@ export function useFileStore(): UseFileStoreResult {
 
       // 调用主进程执行重命名
       const result = await window.api.applyRename(renameList);
+
+      // 如果有成功的重命名，保存到历史记录（用于撤销）
+      if (result.renamed && result.renamed.length > 0) {
+        // 保存反向操作：oldPath 和 newPath 互换
+        const undoItems: RenamedItem[] = result.renamed.map((item) => ({
+          oldPath: item.newPath,
+          newPath: item.oldPath
+        }));
+
+        setHistory((prev) => [
+          ...prev,
+          {
+            timestamp: Date.now(),
+            undoItems
+          }
+        ]);
+      }
+
       return {
         successCount: result.successCount,
         errors: [...localErrors, ...result.errors],
@@ -252,19 +297,80 @@ export function useFileStore(): UseFileStoreResult {
     );
   }, []);
 
+  // 撤销上一次操作
+  const undo = useCallback(async (): Promise<{ success: boolean; error?: string }> => {
+    if (history.length === 0) {
+      return { success: false, error: '没有可撤销的操作' };
+    }
+
+    setIsUndoing(true);
+
+    try {
+      // 获取最近一次操作
+      const lastOperation = history[history.length - 1];
+
+      // 执行反向重命名
+      const result = await window.api.applyRename(
+        lastOperation.undoItems.map((item) => ({
+          oldPath: item.oldPath,
+          newPath: item.newPath
+        }))
+      );
+
+      if (result.errors.length > 0 && result.successCount === 0) {
+        return { success: false, error: result.errors[0].error };
+      }
+
+      // 从历史记录中移除
+      setHistory((prev) => prev.slice(0, -1));
+
+      // 更新文件列表：将新路径改回旧路径
+      if (result.renamed && result.renamed.length > 0) {
+        const pathMap = new Map(result.renamed.map((r) => [r.oldPath, r.newPath]));
+        setFiles((prev) =>
+          prev.map((file) => {
+            const newPath = pathMap.get(file.path);
+            if (newPath) {
+              // 从路径中提取文件名
+              const newName = newPath.split(/[/\\]/).pop() || file.original;
+              return {
+                ...file,
+                original: newName,
+                renamed: newName,
+                path: newPath
+              };
+            }
+            return file;
+          })
+        );
+      }
+
+      return { success: true };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '撤销失败';
+      return { success: false, error: message };
+    } finally {
+      setIsUndoing(false);
+    }
+  }, [history]);
+
   return {
     files,
     isRenaming,
     isApplying,
+    isUndoing,
     hasChanges,
+    canUndo,
     addFiles,
     updateFileName,
     batchUpdateFileNames,
     clearFiles,
+    discardChanges,
     handleDrop,
     startRenaming,
     stopRenaming,
     applyRename,
-    resetAfterApply
+    resetAfterApply,
+    undo
   };
 }
