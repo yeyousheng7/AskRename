@@ -86,6 +86,7 @@ export type UseFileStoreResult = {
   clearFiles: () => void;
   discardChanges: () => void;
   revertFileName: (index: number) => void;
+  applyRule: (handler: (name: string, index: number) => string) => void;
   handleDrop: (e: DragEvent<HTMLDivElement>) => void;
   startRenaming: (instruction: string) => Promise<void>;
   stopRenaming: () => void;
@@ -150,6 +151,16 @@ export function useFileStore(): UseFileStoreResult {
       prev.map((file, i) =>
         i === index ? { ...file, renamed: file.original } : file
       )
+    );
+  }, []);
+
+  // 应用规则：使用 handler 函数批量修改所有文件的 renamed
+  const applyRule = useCallback((handler: (name: string, index: number) => string) => {
+    setFiles((prev) =>
+      prev.map((file, index) => ({
+        ...file,
+        renamed: handler(file.renamed, index)
+      }))
     );
   }, []);
 
@@ -377,6 +388,7 @@ export function useFileStore(): UseFileStoreResult {
     clearFiles,
     discardChanges,
     revertFileName,
+    applyRule,
     handleDrop,
     startRenaming,
     stopRenaming,

@@ -1,4 +1,4 @@
-import { useState, useCallback, type DragEvent, type KeyboardEvent } from 'react';
+import { useState, useCallback, useRef, type DragEvent, type KeyboardEvent } from 'react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -9,10 +9,12 @@ import {
   SquareIcon,
   CheckIcon,
   XIcon,
-  Undo2Icon
+  Undo2Icon,
+  WandIcon
 } from 'lucide-react';
 import { useFileStore } from '@/hooks/useFileStore';
 import EditorRow from '@/components/EditorRow';
+import { QUICK_ACTIONS, type QuickAction } from '@/lib/constants';
 
 // ============================================================================
 // Toast 组件
@@ -74,6 +76,86 @@ function EmptyState(): React.JSX.Element {
 }
 
 // ============================================================================
+// Quick Actions 下拉菜单
+// ============================================================================
+
+interface QuickActionsMenuProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onSelectRule: (handler: (name: string, index: number) => string) => void;
+  onSelectAI: (prompt: string) => void;
+}
+
+function QuickActionsMenu({
+  isOpen,
+  onClose,
+  onSelectRule,
+  onSelectAI
+}: QuickActionsMenuProps): React.JSX.Element | null {
+  if (!isOpen) return null;
+
+  const ruleActions = QUICK_ACTIONS.filter((a): a is Extract<QuickAction, { type: 'rule' }> => a.type === 'rule');
+  const aiActions = QUICK_ACTIONS.filter((a): a is Extract<QuickAction, { type: 'ai' }> => a.type === 'ai');
+
+  const handleClick = (action: QuickAction) => {
+    if (action.type === 'rule') {
+      onSelectRule(action.handler);
+    } else {
+      onSelectAI(action.prompt);
+    }
+    onClose();
+  };
+
+  return (
+    <>
+      {/* 点击背景关闭 */}
+      <div className="fixed inset-0 z-40" onClick={onClose} />
+
+      {/* 菜单面板 */}
+      <div className="absolute bottom-full left-0 mb-2 z-50 w-56 bg-white dark:bg-slate-900 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 py-1 animate-in fade-in-0 zoom-in-95 slide-in-from-bottom-2">
+        {/* 规则类 */}
+        <div className="px-2 py-1.5">
+          <span className="text-xs font-medium text-slate-400 dark:text-slate-500 uppercase tracking-wide">
+            规则转换
+          </span>
+        </div>
+        {ruleActions.map((action) => (
+          <button
+            key={action.label}
+            onClick={() => handleClick(action)}
+            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+          >
+            <action.icon className="h-4 w-4 text-slate-400" />
+            {action.label}
+          </button>
+        ))}
+
+        {/* 分割线 */}
+        <div className="my-1 border-t border-slate-200 dark:border-slate-700" />
+
+        {/* AI 类 */}
+        <div className="px-2 py-1.5">
+          <span className="text-xs font-medium text-slate-400 dark:text-slate-500 uppercase tracking-wide">
+            AI 智能
+          </span>
+        </div>
+        {aiActions.map((action) => (
+          <button
+            key={action.label}
+            onClick={() => handleClick(action)}
+            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+          >
+            <action.icon className="h-4 w-4 text-purple-500" />
+            {action.label}
+            <SparklesIcon className="h-3 w-3 text-purple-400 ml-auto" />
+          </button>
+        ))}
+      </div>
+    </>
+  );
+}
+
+// ============================================================================
 // App 主组件
 // ============================================================================
 
@@ -85,6 +167,9 @@ function App(): React.JSX.Element {
     type: 'success' | 'error';
     action?: { label: string; onClick: () => void };
   } | null>(null);
+  const [isQuickActionsOpen, setIsQuickActionsOpen] = useState(false);
+
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const {
     files,
@@ -96,6 +181,7 @@ function App(): React.JSX.Element {
     updateFileName,
     discardChanges,
     revertFileName,
+    applyRule,
     handleDrop,
     startRenaming,
     stopRenaming,
@@ -193,6 +279,23 @@ function App(): React.JSX.Element {
       console.error('应用失败:', err);
     }
   }, [isApplying, hasChanges, applyRename, resetAfterApply, showToast, handleUndo]);
+
+  // 快捷指令 - 规则类
+  const handleQuickRule = useCallback(
+    (handler: (name: string, index: number) => string) => {
+      applyRule(handler);
+    },
+    [applyRule]
+  );
+
+  // 快捷指令 - AI 类
+  const handleQuickAI = useCallback((prompt: string) => {
+    setInstruction(prompt);
+    // 延迟聚焦确保状态更新
+    setTimeout(() => {
+      inputRef.current?.focus();
+    }, 50);
+  }, []);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLInputElement>) => {
@@ -336,7 +439,28 @@ function App(): React.JSX.Element {
             )}
           </Button>
 
+          {/* 快捷指令按钮 */}
+          <div className="relative">
+            <Button
+              onClick={() => setIsQuickActionsOpen(!isQuickActionsOpen)}
+              size="default"
+              variant="ghost"
+              className="h-9 px-3 text-sm font-medium text-purple-500 hover:text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-950/30"
+              disabled={isEmpty || isRenaming || isApplying || isUndoing}
+              title="快捷指令"
+            >
+              <WandIcon className="h-4 w-4" />
+            </Button>
+            <QuickActionsMenu
+              isOpen={isQuickActionsOpen}
+              onClose={() => setIsQuickActionsOpen(false)}
+              onSelectRule={handleQuickRule}
+              onSelectAI={handleQuickAI}
+            />
+          </div>
+
           <Input
+            ref={inputRef}
             type="text"
             placeholder={
               isReviewMode
