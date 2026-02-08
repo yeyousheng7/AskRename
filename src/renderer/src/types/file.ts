@@ -1,7 +1,6 @@
 export interface FileItem {
-  id: string
-  original: string
-  renamed: string
-  path: string
+  id: string;
+  original: string;
+  renamed: string;
+  path: string;
 }
-

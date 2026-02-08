@@ -1,18 +1,24 @@
-import { useCallback, useMemo, useState, type KeyboardEvent } from 'react'
-import { diffChars } from 'diff'
-import TextareaAutosize from 'react-textarea-autosize'
-import type { FileItem } from '@/types/file'
+import { useCallback, useMemo, useState, type KeyboardEvent } from 'react';
+import { diffChars } from 'diff';
+import TextareaAutosize from 'react-textarea-autosize';
+import type { FileItem } from '@/types/file';
 
-const textStyles = 'font-mono text-sm leading-6'
+const textStyles = 'font-mono text-sm leading-6';
 
-function DiffRemovedText({ original, renamed }: { original: string; renamed: string }): React.JSX.Element {
-  const parts = useMemo(() => diffChars(original, renamed), [original, renamed])
+function DiffRemovedText({
+  original,
+  renamed
+}: {
+  original: string;
+  renamed: string;
+}): React.JSX.Element {
+  const parts = useMemo(() => diffChars(original, renamed), [original, renamed]);
 
   return (
     <span className={textStyles}>
       {parts.map((part, index) => {
         if (part.added) {
-          return null
+          return null;
         }
         if (part.removed) {
           return (
@@ -22,16 +28,16 @@ function DiffRemovedText({ original, renamed }: { original: string; renamed: str
             >
               {part.value}
             </span>
-          )
+          );
         }
         return (
           <span key={index} className="text-slate-600 dark:text-slate-400">
             {part.value}
           </span>
-        )
+        );
       })}
     </span>
-  )
+  );
 }
 
 function DiffAddedText({
@@ -39,11 +45,11 @@ function DiffAddedText({
   renamed,
   onClick
 }: {
-  original: string
-  renamed: string
-  onClick: () => void
+  original: string;
+  renamed: string;
+  onClick: () => void;
 }): React.JSX.Element {
-  const parts = useMemo(() => diffChars(original, renamed), [original, renamed])
+  const parts = useMemo(() => diffChars(original, renamed), [original, renamed]);
 
   return (
     <div
@@ -52,7 +58,7 @@ function DiffAddedText({
     >
       {parts.map((part, index) => {
         if (part.removed) {
-          return null
+          return null;
         }
         if (part.added) {
           return (
@@ -62,25 +68,25 @@ function DiffAddedText({
             >
               {part.value}
             </span>
-          )
+          );
         }
-        return <span key={index}>{part.value}</span>
+        return <span key={index}>{part.value}</span>;
       })}
       {renamed.length === 0 && (
         <span className="text-slate-300 dark:text-slate-600 italic">鐐瑰嚮缂栬緫...</span>
       )}
     </div>
-  )
+  );
 }
 
 export type EditorRowProps = {
-  file: FileItem
-  index: number
-  filesLength: number
-  editingIndex: number | null
-  setEditingIndex: (next: number | null) => void
-  onRename: (id: string, newName: string) => void
-}
+  file: FileItem;
+  index: number;
+  filesLength: number;
+  editingIndex: number | null;
+  setEditingIndex: (next: number | null) => void;
+  onRename: (id: string, newName: string) => void;
+};
 
 export default function EditorRow({
   file,
@@ -90,51 +96,51 @@ export default function EditorRow({
   setEditingIndex,
   onRename
 }: EditorRowProps): React.JSX.Element {
-  const [isHovered, setIsHovered] = useState(false)
+  const [isHovered, setIsHovered] = useState(false);
 
   const stopEditing = useCallback(() => {
-    setEditingIndex(null)
-  }, [setEditingIndex])
+    setEditingIndex(null);
+  }, [setEditingIndex]);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement>) => {
-      const textarea = e.currentTarget
-      const { selectionStart, selectionEnd, value } = textarea
+      const textarea = e.currentTarget;
+      const { selectionStart, selectionEnd, value } = textarea;
 
       if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault()
-        stopEditing()
-        return
+        e.preventDefault();
+        stopEditing();
+        return;
       }
 
       if (e.key === 'Escape') {
-        e.preventDefault()
-        stopEditing()
-        return
+        e.preventDefault();
+        stopEditing();
+        return;
       }
 
-      if (selectionStart !== selectionEnd) return
+      if (selectionStart !== selectionEnd) return;
 
       if (e.key === 'ArrowUp') {
-        const textBeforeCursor = value.substring(0, selectionStart)
-        const isFirstLine = !textBeforeCursor.includes('\n')
+        const textBeforeCursor = value.substring(0, selectionStart);
+        const isFirstLine = !textBeforeCursor.includes('\n');
 
         if (isFirstLine && index > 0) {
-          e.preventDefault()
-          setEditingIndex(index - 1)
+          e.preventDefault();
+          setEditingIndex(index - 1);
         }
       } else if (e.key === 'ArrowDown') {
-        const textAfterCursor = value.substring(selectionStart)
-        const isLastLine = !textAfterCursor.includes('\n')
+        const textAfterCursor = value.substring(selectionStart);
+        const isLastLine = !textAfterCursor.includes('\n');
 
         if (isLastLine && index < filesLength - 1) {
-          e.preventDefault()
-          setEditingIndex(index + 1)
+          e.preventDefault();
+          setEditingIndex(index + 1);
         }
       }
     },
     [filesLength, index, setEditingIndex, stopEditing]
-  )
+  );
 
   return (
     <div
@@ -178,5 +184,5 @@ export default function EditorRow({
         )}
       </div>
     </div>
-  )
+  );
 }

@@ -1,10 +1,10 @@
-import { useState, useCallback, type DragEvent } from 'react'
-import { ScrollArea } from '@/components/ui/scroll-area'
-import { Input } from '@/components/ui/input'
-import { Button } from '@/components/ui/button'
-import { SparklesIcon, UploadIcon } from 'lucide-react'
-import { useFileStore } from '@/hooks/useFileStore'
-import EditorRow from '@/components/EditorRow'
+import { useState, useCallback, type DragEvent } from 'react';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+import { SparklesIcon, UploadIcon } from 'lucide-react';
+import { useFileStore } from '@/hooks/useFileStore';
+import EditorRow from '@/components/EditorRow';
 
 function EmptyState(): React.JSX.Element {
   return (
@@ -17,52 +17,50 @@ function EmptyState(): React.JSX.Element {
           <p className="text-lg font-medium text-slate-500 dark:text-slate-400">
             拖入文件以开始重命名
           </p>
-          <p className="mt-1 text-sm text-slate-400 dark:text-slate-500">
-            支持批量拖入多个文件
-          </p>
+          <p className="mt-1 text-sm text-slate-400 dark:text-slate-500">支持批量拖入多个文件</p>
         </div>
       </div>
     </div>
-  )
+  );
 }
 
 function App(): React.JSX.Element {
-  const [instruction, setInstruction] = useState('')
-  const { files, updateFileName, handleDrop } = useFileStore()
-  const [isDragging, setIsDragging] = useState(false)
-  const [editingIndex, setEditingIndex] = useState<number | null>(null)
+  const [instruction, setInstruction] = useState('');
+  const { files, updateFileName, handleDrop } = useFileStore();
+  const [isDragging, setIsDragging] = useState(false);
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
 
   const handleRename = (): void => {
-    console.log('开始重命名，指令:', instruction)
-  }
+    console.log('开始重命名，指令:', instruction);
+  };
 
   const handleDragOver = useCallback((e: DragEvent<HTMLDivElement>) => {
-    e.preventDefault()
-    e.stopPropagation()
-  }, [])
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
 
   const handleDragEnter = useCallback((e: DragEvent<HTMLDivElement>) => {
-    e.preventDefault()
-    e.stopPropagation()
-    setIsDragging(true)
-  }, [])
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  }, []);
 
   const handleDragLeave = useCallback((e: DragEvent<HTMLDivElement>) => {
-    e.preventDefault()
-    e.stopPropagation()
+    e.preventDefault();
+    e.stopPropagation();
     if (e.currentTarget === e.target) {
-      setIsDragging(false)
+      setIsDragging(false);
     }
-  }, [])
+  }, []);
 
-  const isEmpty = files.length === 0
+  const isEmpty = files.length === 0;
 
   return (
     <div
       className={`flex h-screen w-screen flex-col bg-white dark:bg-slate-950 transition-colors ${isDragging ? 'bg-blue-50/50 dark:bg-blue-950/20' : ''}`}
       onDrop={(e) => {
-        setIsDragging(false)
-        handleDrop(e)
+        setIsDragging(false);
+        handleDrop(e);
       }}
       onDragOver={handleDragOver}
       onDragEnter={handleDragEnter}
@@ -142,7 +140,7 @@ function App(): React.JSX.Element {
         </div>
       </footer>
     </div>
-  )
+  );
 }
 
-export default App
+export default App;
