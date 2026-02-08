@@ -1,8 +1,8 @@
-import { useState, useCallback, type DragEvent } from 'react';
+import { useState, useCallback, type DragEvent, type KeyboardEvent } from 'react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { SparklesIcon, UploadIcon } from 'lucide-react';
+import { SparklesIcon, UploadIcon, LoaderIcon, SquareIcon } from 'lucide-react';
 import { useFileStore } from '@/hooks/useFileStore';
 import EditorRow from '@/components/EditorRow';
 
@@ -26,13 +26,34 @@ function EmptyState(): React.JSX.Element {
 
 function App(): React.JSX.Element {
   const [instruction, setInstruction] = useState('');
-  const { files, updateFileName, handleDrop } = useFileStore();
+  const [error, setError] = useState<string | null>(null);
+  const { files, isRenaming, updateFileName, handleDrop, startRenaming, stopRenaming } =
+    useFileStore();
   const [isDragging, setIsDragging] = useState(false);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
 
-  const handleRename = (): void => {
-    console.log('开始重命名，指令:', instruction);
-  };
+  const handleRename = useCallback(async () => {
+    if (isRenaming || files.length === 0 || !instruction.trim()) return;
+
+    setError(null);
+    try {
+      await startRenaming(instruction);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '重命名失败，请重试';
+      setError(message);
+      console.error('重命名失败:', err);
+    }
+  }, [instruction, isRenaming, files.length, startRenaming]);
+
+  const handleKeyDown = useCallback(
+    (e: KeyboardEvent<HTMLInputElement>) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        handleRename();
+      }
+    },
+    [handleRename]
+  );
 
   const handleDragOver = useCallback((e: DragEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -92,9 +113,16 @@ function App(): React.JSX.Element {
           <span className="font-mono text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
             预览文本
           </span>
-          <span className="ml-2 font-mono text-xs text-slate-400 dark:text-slate-500">
-            (点击编辑)
-          </span>
+          {isRenaming ? (
+            <span className="ml-2 font-mono text-xs text-blue-500 flex items-center gap-1">
+              <LoaderIcon className="h-3 w-3 animate-spin" />
+              AI 生成中...
+            </span>
+          ) : (
+            <span className="ml-2 font-mono text-xs text-slate-400 dark:text-slate-500">
+              (点击编辑)
+            </span>
+          )}
         </div>
       </div>
 
@@ -112,6 +140,7 @@ function App(): React.JSX.Element {
                 editingIndex={editingIndex}
                 setEditingIndex={setEditingIndex}
                 onRename={updateFileName}
+                isLoading={isRenaming}
               />
             ))}
           </div>
@@ -119,24 +148,42 @@ function App(): React.JSX.Element {
       )}
 
       <footer className="flex-shrink-0 border-t border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-sm p-3">
+        {error && (
+          <div className="mb-2 text-sm text-red-500 bg-red-50 dark:bg-red-950/30 px-3 py-1.5 rounded">
+            {error}
+          </div>
+        )}
         <div className="flex items-center gap-3">
           <Input
             type="text"
             placeholder="输入重命名指令，例如：将所有图片按日期命名..."
             value={instruction}
             onChange={(e) => setInstruction(e.target.value)}
+            onKeyDown={handleKeyDown}
             className="flex-1 h-9 font-mono text-sm bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-600 focus:border-blue-400 focus:ring-blue-400/20"
-            disabled={isEmpty}
+            disabled={isEmpty || isRenaming}
           />
-          <Button
-            onClick={handleRename}
-            size="default"
-            className="h-9 px-5 text-sm font-medium"
-            disabled={isEmpty}
-          >
-            <SparklesIcon className="mr-2 h-4 w-4" />
-            开始重命名
-          </Button>
+          {isRenaming ? (
+            <Button
+              onClick={stopRenaming}
+              size="default"
+              variant="destructive"
+              className="h-9 px-5 text-sm font-medium"
+            >
+              <SquareIcon className="mr-2 h-4 w-4" />
+              停止
+            </Button>
+          ) : (
+            <Button
+              onClick={handleRename}
+              size="default"
+              className="h-9 px-5 text-sm font-medium"
+              disabled={isEmpty || !instruction.trim()}
+            >
+              <SparklesIcon className="mr-2 h-4 w-4" />
+              开始重命名
+            </Button>
+          )}
         </div>
       </footer>
     </div>

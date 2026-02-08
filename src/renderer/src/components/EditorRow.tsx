@@ -86,6 +86,7 @@ export type EditorRowProps = {
   editingIndex: number | null;
   setEditingIndex: (next: number | null) => void;
   onRename: (id: string, newName: string) => void;
+  isLoading?: boolean;
 };
 
 export default function EditorRow({
@@ -94,7 +95,8 @@ export default function EditorRow({
   filesLength,
   editingIndex,
   setEditingIndex,
-  onRename
+  onRename,
+  isLoading = false
 }: EditorRowProps): React.JSX.Element {
   const [isHovered, setIsHovered] = useState(false);
 
@@ -165,7 +167,11 @@ export default function EditorRow({
       </div>
 
       <div className="px-3 py-1.5 bg-white dark:bg-slate-950">
-        {editingIndex === index ? (
+        {isLoading ? (
+          <div className="flex items-center h-6">
+            <div className="h-4 bg-gradient-to-r from-slate-200 via-slate-100 to-slate-200 dark:from-slate-700 dark:via-slate-600 dark:to-slate-700 rounded animate-pulse w-3/4" />
+          </div>
+        ) : editingIndex === index ? (
           <TextareaAutosize
             value={file.renamed}
             onChange={(e) => onRename(file.id, e.target.value)}
