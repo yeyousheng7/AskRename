@@ -253,6 +253,35 @@ export function useFileStore(): UseFileStoreResult {
       // 构建重命名列表：只处理有变化的文件
       // 只传 newName，由主进程负责拼接路径，避免 Windows 分隔符/盘符在 renderer 端出错
       const localErrors: { path: string; error: string }[] = [];
+
+      // 辅助函数：获取扩展名（包含点号）
+      const getExtension = (name: string): string => {
+        const lastDot = name.lastIndexOf('.');
+        // 确保点号不在开头且后面有内容
+        if (lastDot > 0 && lastDot < name.length - 1) {
+          return name.slice(lastDot);
+        }
+        return '';
+      };
+
+      // 辅助函数：智能补全扩展名
+      const ensureExtension = (newName: string, originalName: string): string => {
+        const newExt = getExtension(newName);
+        const origExt = getExtension(originalName);
+
+        // 如果 newName 已有扩展名，保持不变（尊重用户意图）
+        if (newExt) {
+          return newName;
+        }
+
+        // 如果 newName 没有扩展名但 original 有，自动补全
+        if (!newExt && origExt) {
+          return newName + origExt;
+        }
+
+        return newName;
+      };
+
       const renameList = files
         .filter((file) => file.original !== file.renamed)
         .flatMap((file) => {
@@ -263,10 +292,14 @@ export function useFileStore(): UseFileStoreResult {
             });
             return [];
           }
+
+          // 智能扩展名补全
+          const finalName = ensureExtension(file.renamed, file.original);
+
           return [
             {
               oldPath: file.path,
-              newName: file.renamed
+              newName: finalName
             }
           ];
         });
@@ -306,15 +339,29 @@ export function useFileStore(): UseFileStoreResult {
   }, [files, hasChanges]);
 
   // 重命名成功后重置列表
+  // 从后端返回的实际路径（可能带序号）更新状态
   const resetAfterApply = useCallback((renamed?: RenamedItem[]) => {
     const pathMap = new Map((renamed || []).map((r) => [r.oldPath, r.newPath]));
+
     setFiles((prev) =>
-      prev.map((file) => ({
-        ...file,
-        original: file.renamed,
-        // 由主进程返回 newPath，避免 renderer 端路径处理差异
-        path: pathMap.get(file.path) || file.path
-      }))
+      prev.map((file) => {
+        const actualNewPath = pathMap.get(file.path);
+        if (actualNewPath) {
+          // 从实际路径提取文件名作为新的 original
+          const actualFileName = actualNewPath.split(/[\\/]/).pop() || file.renamed;
+          return {
+            ...file,
+            original: actualFileName,
+            renamed: actualFileName,
+            path: actualNewPath
+          };
+        }
+        // 未改名的保持原样
+        return {
+          ...file,
+          original: file.renamed
+        };
+      })
     );
   }, []);
 

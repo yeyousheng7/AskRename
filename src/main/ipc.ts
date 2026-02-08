@@ -285,9 +285,8 @@ export function registerAIHandlers(): void {
         tasks.push({ oldPath, newPath });
       }
 
-      // 验证源文件存在、目标名冲突（支持批量互换/循环重命名）
+      // 验证源文件存在
       const taskOldSet = new Set(tasks.map((t) => normalizePathForCompare(t.oldPath)));
-      const taskNewSet = new Set<string>();
       const effectiveTasks: { oldPath: string; newPath: string }[] = [];
 
       for (const task of tasks) {
@@ -299,49 +298,59 @@ export function registerAIHandlers(): void {
           continue;
         }
 
-        // 如果新旧路径相同（或 Windows 下仅大小写不同），仍然作为一次“成功”或“需要处理”的任务
-        const oldNorm = normalizePathForCompare(task.oldPath);
-        const newNorm = normalizePathForCompare(task.newPath);
-
-        // 目标重复（同一次批量中）
-        if (taskNewSet.has(newNorm)) {
-          errors.push({ path: task.oldPath, error: '批量重命名中存在重复的目标文件名' });
-          continue;
-        }
-        taskNewSet.add(newNorm);
-
         // old === new：直接算成功（无需文件系统操作）
         if (task.oldPath === task.newPath) {
           successCount++;
           continue;
         }
 
-        // 检查目标文件是否已存在：
-        // - 若目标是本批次的某个 oldPath：允许（会先挪走到 temp）
-        // - 若 Windows 下仅大小写更改：允许（需要两步重命名）
-        // - 否则：报错
-        try {
-          await fs.access(task.newPath);
-          const isTargetInBatch = taskOldSet.has(newNorm);
-          const isCaseOnly = isWindowsPlatform() && oldNorm === newNorm;
-          if (!isTargetInBatch && !isCaseOnly) {
-            errors.push({
-              path: task.oldPath,
-              error: `目标文件已存在: ${path.basename(task.newPath)}`
-            });
-            continue;
-          }
-        } catch {
-          // 目标不存在，可以继续
-        }
-
         effectiveTasks.push(task);
       }
+
+      // 辅助函数：查找不冲突的文件路径（自动添加序号）
+      const findNonConflictPath = async (
+        targetPath: string,
+        oldPath: string
+      ): Promise<string> => {
+        const dir = path.dirname(targetPath);
+        const ext = path.extname(targetPath);
+        const base = path.basename(targetPath, ext);
+        const oldNorm = normalizePathForCompare(oldPath);
+
+        let candidate = targetPath;
+        let counter = 0;
+
+        while (true) {
+          const candidateNorm = normalizePathForCompare(candidate);
+
+          // 如果目标是当前批次的某个源文件，跳过检测（两阶段重命名会处理）
+          if (taskOldSet.has(candidateNorm)) {
+            return candidate;
+          }
+
+          // Windows 下仅大小写更改也允许
+          if (isWindowsPlatform() && oldNorm === candidateNorm) {
+            return candidate;
+          }
+
+          // 检查目标是否存在
+          try {
+            await fs.access(candidate);
+            // 存在，尝试下一个序号
+            counter++;
+            candidate = path.join(dir, `${base} (${counter})${ext}`);
+          } catch {
+            // 不存在，可以使用
+            return candidate;
+          }
+        }
+      };
 
       // 两阶段重命名：old -> temp -> new，避免互换/循环/大小写重命名失败
       const movedToTemp: { oldPath: string; tempPath: string; newPath: string }[] = [];
 
       try {
+        // 阶段 1：全部移动到临时文件
         for (let index = 0; index < effectiveTasks.length; index++) {
           const task = effectiveTasks[index];
           const dir = path.dirname(task.oldPath);
@@ -351,10 +360,14 @@ export function registerAIHandlers(): void {
           movedToTemp.push({ oldPath: task.oldPath, tempPath, newPath: task.newPath });
         }
 
+        // 阶段 2：从临时文件移动到最终位置（带防冲突）
         for (const moved of movedToTemp) {
-          await fs.rename(moved.tempPath, moved.newPath);
+          // 查找不冲突的最终路径
+          const finalPath = await findNonConflictPath(moved.newPath, moved.oldPath);
+          await fs.rename(moved.tempPath, finalPath);
           successCount++;
-          renamed.push({ oldPath: moved.oldPath, newPath: moved.newPath });
+          // 返回实际生效的路径（可能带序号）
+          renamed.push({ oldPath: moved.oldPath, newPath: finalPath });
         }
       } catch (error) {
         // 尝试回滚已移动到 temp 的文件，避免留下临时文件名
