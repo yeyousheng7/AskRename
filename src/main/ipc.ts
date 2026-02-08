@@ -6,34 +6,18 @@
 import { ipcMain } from 'electron';
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import type {
+  AIChatRequest,
+  AIChatResponse,
+  RenameError,
+  RenameFileItem,
+  RenamedItem,
+  RenameResult
+} from '@shared/ipc-types';
 
 // ============================================================================
 // 类型定义
 // ============================================================================
-
-export interface AISettings {
-  apiKey: string;
-  baseURL: string;
-  model: string;
-  jsonMode: boolean;
-  maxTokens: number;
-}
-
-export interface ChatMessage {
-  role: 'system' | 'user' | 'assistant';
-  content: string;
-}
-
-export interface AIChatRequest {
-  settings: AISettings;
-  messages: ChatMessage[];
-}
-
-export interface AIChatResponse {
-  success: boolean;
-  content?: string;
-  error?: string;
-}
 
 interface OpenAIChatResponse {
   choices: {
@@ -41,37 +25,6 @@ interface OpenAIChatResponse {
       content: string | null;
     };
   }[];
-}
-
-// 文件重命名类型
-export interface RenameFileItem {
-  oldPath: string;
-  /**
-   * 新文件名（仅文件名，不包含路径）。推荐使用该字段，由主进程负责拼接路径，避免
-   * renderer 端 path 处理在 Windows 上出错（例如分隔符、盘符）。
-   */
-  newName?: string;
-  /**
-   * 兼容旧版：直接传完整目标路径。
-   * 若同时提供 newName 与 newPath，以 newName 为准（保持“同目录重命名”）。
-   */
-  newPath?: string;
-}
-
-export interface RenameError {
-  path: string;
-  error: string;
-}
-
-export interface RenamedItem {
-  oldPath: string;
-  newPath: string;
-}
-
-export interface RenameResult {
-  successCount: number;
-  errors: RenameError[];
-  renamed?: RenamedItem[];
 }
 
 // ============================================================================
@@ -308,10 +261,7 @@ export function registerAIHandlers(): void {
       }
 
       // 辅助函数：查找不冲突的文件路径（自动添加序号）
-      const findNonConflictPath = async (
-        targetPath: string,
-        oldPath: string
-      ): Promise<string> => {
+      const findNonConflictPath = async (targetPath: string, oldPath: string): Promise<string> => {
         const dir = path.dirname(targetPath);
         const ext = path.extname(targetPath);
         const base = path.basename(targetPath, ext);

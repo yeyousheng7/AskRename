@@ -1,49 +1,20 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import { electronAPI } from '@electron-toolkit/preload';
+import type {
+  AIChatResponse,
+  AIChatSettings,
+  ChatMessage,
+  RenameFileItem,
+  RenameResult
+} from '@shared/ipc-types';
 
 // ============================================================================
 // AI API 类型定义
 // ============================================================================
 
-interface AISettings {
-  apiKey: string;
-  baseURL: string;
-  model: string;
-  jsonMode: boolean;
-  maxTokens: number;
-}
-
-interface ChatMessage {
-  role: 'system' | 'user' | 'assistant';
-  content: string;
-}
-
-interface AIChatResponse {
-  success: boolean;
-  content?: string;
-  error?: string;
-}
-
 // ============================================================================
 // 文件重命名类型定义
 // ============================================================================
-
-interface RenameFileItem {
-  oldPath: string;
-  newName?: string;
-  newPath?: string;
-}
-
-interface RenameError {
-  path: string;
-  error: string;
-}
-
-interface RenameResult {
-  successCount: number;
-  errors: RenameError[];
-  renamed?: { oldPath: string; newPath: string }[];
-}
 
 // ============================================================================
 // Custom APIs for renderer
@@ -72,7 +43,7 @@ const api = {
    * @param messages - 聊天消息数组
    * @returns AI 响应结果
    */
-  askAI: (settings: AISettings, messages: ChatMessage[]): Promise<AIChatResponse> => {
+  askAI: (settings: AIChatSettings, messages: ChatMessage[]): Promise<AIChatResponse> => {
     return ipcRenderer.invoke('ai:chat', { settings, messages });
   },
 

@@ -1,12 +1,18 @@
 import type { LucideIcon } from 'lucide-react';
 import { Hash, Scissors, ArrowDown, FileCode, Languages, Calendar } from 'lucide-react';
+import { splitFileName } from '@/lib/filename';
 
 // ============================================================================
 // 快捷指令类型定义
 // ============================================================================
 
 export type QuickAction =
-  | { type: 'rule'; label: string; icon: LucideIcon; handler: (name: string, index: number) => string }
+  | {
+      type: 'rule';
+      label: string;
+      icon: LucideIcon;
+      handler: (name: string, index: number) => string;
+    }
   | { type: 'ai'; label: string; icon: LucideIcon; prompt: string };
 
 // ============================================================================
@@ -20,8 +26,7 @@ export const QUICK_ACTIONS: QuickAction[] = [
     label: '添加序号',
     icon: Hash,
     handler: (name: string, index: number) => {
-      const ext = name.lastIndexOf('.') > 0 ? name.slice(name.lastIndexOf('.')) : '';
-      const base = ext ? name.slice(0, name.lastIndexOf('.')) : name;
+      const { base, ext } = splitFileName(name);
       const seq = String(index + 1).padStart(3, '0');
       return `${base}_${seq}${ext}`;
     }

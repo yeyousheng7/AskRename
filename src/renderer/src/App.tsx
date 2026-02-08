@@ -1,4 +1,11 @@
-import { useState, useCallback, useRef, type DragEvent, type KeyboardEvent } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type DragEvent,
+  type KeyboardEvent
+} from 'react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -18,26 +25,30 @@ import { useFileStore } from '@/hooks/useFileStore';
 import { useTheme } from '@/hooks/useTheme';
 import EditorRow from '@/components/EditorRow';
 import { QUICK_ACTIONS, type QuickAction } from '@/lib/constants';
+import { cn } from '@/lib/utils';
 
 // ============================================================================
 // Toast 组件
 // ============================================================================
 
+type ToastType = 'success' | 'error';
+type ToastAction = { label: string; onClick: () => void };
+type ToastState = { message: string; type: ToastType; action?: ToastAction };
+
 interface ToastProps {
   message: string;
-  type: 'success' | 'error';
+  type: ToastType;
   onClose: () => void;
-  action?: {
-    label: string;
-    onClick: () => void;
-  };
+  action?: ToastAction;
 }
 
 function Toast({ message, type, onClose, action }: ToastProps): React.JSX.Element {
   return (
     <div
-      className={`fixed top-4 right-4 z-50 flex items-center gap-2 px-4 py-3 rounded-lg shadow-lg animate-in slide-in-from-top-2 ${type === 'success' ? 'bg-emerald-500 text-white' : 'bg-red-500 text-white'
-        }`}
+      className={cn(
+        'fixed top-4 right-4 z-50 flex items-center gap-2 px-4 py-3 rounded-lg shadow-lg animate-in slide-in-from-top-2',
+        type === 'success' ? 'bg-emerald-500 text-white' : 'bg-red-500 text-white'
+      )}
     >
       {type === 'success' ? <CheckIcon className="h-4 w-4" /> : <XIcon className="h-4 w-4" />}
       <span className="text-sm font-medium">{message}</span>
@@ -104,7 +115,12 @@ function QuickActionsMenu({
     (a): a is Extract<QuickAction, { type: 'ai' }> => a.type === 'ai'
   );
 
-  const handleClick = (action: QuickAction) => {
+  const sectionLabelClass =
+    'text-xs font-medium text-zinc-400 dark:text-zinc-500 uppercase tracking-wide';
+  const menuItemClass =
+    'w-full flex items-center gap-2 px-3 py-2 text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors';
+
+  const handleClick = (action: QuickAction): void => {
     if (action.type === 'rule') {
       onSelectRule(action.handler);
     } else {
@@ -122,16 +138,10 @@ function QuickActionsMenu({
       <div className="absolute bottom-full left-0 mb-2 z-50 w-56 bg-white dark:bg-zinc-900 rounded-lg shadow-lg border border-zinc-200 dark:border-zinc-800 py-1 animate-in fade-in-0 zoom-in-95 slide-in-from-bottom-2">
         {/* 规则类 */}
         <div className="px-2 py-1.5">
-          <span className="text-xs font-medium text-zinc-400 dark:text-zinc-500 uppercase tracking-wide">
-            规则转换
-          </span>
+          <span className={sectionLabelClass}>规则转换</span>
         </div>
         {ruleActions.map((action) => (
-          <button
-            key={action.label}
-            onClick={() => handleClick(action)}
-            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-          >
+          <button key={action.label} onClick={() => handleClick(action)} className={menuItemClass}>
             <action.icon className="h-4 w-4 text-zinc-400" />
             {action.label}
           </button>
@@ -142,16 +152,10 @@ function QuickActionsMenu({
 
         {/* AI 类 */}
         <div className="px-2 py-1.5">
-          <span className="text-xs font-medium text-zinc-400 dark:text-zinc-500 uppercase tracking-wide">
-            AI 智能
-          </span>
+          <span className={sectionLabelClass}>AI 智能</span>
         </div>
         {aiActions.map((action) => (
-          <button
-            key={action.label}
-            onClick={() => handleClick(action)}
-            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-          >
+          <button key={action.label} onClick={() => handleClick(action)} className={menuItemClass}>
             <action.icon className="h-4 w-4 text-purple-500" />
             {action.label}
             <SparklesIcon className="h-3 w-3 text-purple-400 ml-auto" />
@@ -169,14 +173,11 @@ function QuickActionsMenu({
 function App(): React.JSX.Element {
   const [instruction, setInstruction] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [toast, setToast] = useState<{
-    message: string;
-    type: 'success' | 'error';
-    action?: { label: string; onClick: () => void };
-  } | null>(null);
+  const [toast, setToast] = useState<ToastState | null>(null);
   const [isQuickActionsOpen, setIsQuickActionsOpen] = useState(false);
 
   const inputRef = useRef<HTMLInputElement>(null);
+  const toastTimerRef = useRef<number | null>(null);
 
   const { resolvedTheme, toggleTheme } = useTheme();
 
@@ -206,18 +207,22 @@ function App(): React.JSX.Element {
   const isReviewMode = hasChanges && !isRenaming;
 
   // 显示 Toast
-  const showToast = useCallback(
-    (
-      message: string,
-      type: 'success' | 'error',
-      action?: { label: string; onClick: () => void }
-    ) => {
-      setToast({ message, type, action });
-      // 5秒后自动关闭（有操作按钮时给更多时间）
-      setTimeout(() => setToast(null), action ? 5000 : 3000);
-    },
-    []
-  );
+  const showToast = useCallback((message: string, type: ToastType, action?: ToastAction) => {
+    setToast({ message, type, action });
+    if (toastTimerRef.current) {
+      window.clearTimeout(toastTimerRef.current);
+    }
+    // 5秒后自动关闭（有操作按钮时给更多时间）
+    toastTimerRef.current = window.setTimeout(() => setToast(null), action ? 5000 : 3000);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) {
+        window.clearTimeout(toastTimerRef.current);
+      }
+    };
+  }, []);
 
   // 撤销处理
   const handleUndo = useCallback(async () => {
@@ -339,8 +344,10 @@ function App(): React.JSX.Element {
 
   return (
     <div
-      className={`flex h-screen w-screen flex-col bg-white dark:bg-zinc-950 transition-colors ${isDragging ? 'bg-blue-50/50 dark:bg-blue-950/20' : ''
-        }`}
+      className={cn(
+        'flex h-screen w-screen flex-col bg-white dark:bg-zinc-950 transition-colors',
+        isDragging && 'bg-blue-50/50 dark:bg-blue-950/20'
+      )}
       onDrop={(e) => {
         setIsDragging(false);
         handleDrop(e);
@@ -450,9 +457,8 @@ function App(): React.JSX.Element {
           {/* 撤销按钮 */}
           <Button
             onClick={handleUndo}
-            size="default"
+            size="icon"
             variant="outline"
-            className="h-9 px-3 text-sm font-medium"
             disabled={!canUndo || isUndoing || isApplying || isRenaming}
             title={canUndo ? '撤销上一步操作' : '没有可撤销的操作'}
           >
@@ -467,9 +473,9 @@ function App(): React.JSX.Element {
           <div className="relative">
             <Button
               onClick={() => setIsQuickActionsOpen(!isQuickActionsOpen)}
-              size="default"
+              size="icon"
               variant="ghost"
-              className="h-9 px-3 text-sm font-medium text-purple-500 hover:text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-950/30"
+              className="text-purple-500 hover:text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-950/30"
               disabled={isEmpty || isRenaming || isApplying || isUndoing}
               title="快捷指令"
             >
@@ -494,7 +500,7 @@ function App(): React.JSX.Element {
             value={instruction}
             onChange={(e) => setInstruction(e.target.value)}
             onKeyDown={handleKeyDown}
-            className="flex-1 h-9 font-mono text-sm bg-zinc-50 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 focus:border-blue-400 focus:ring-blue-400/20 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500"
+            className="flex-1 font-mono bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500"
             disabled={isEmpty || isRenaming || isApplying || isUndoing}
           />
 
@@ -504,9 +510,8 @@ function App(): React.JSX.Element {
               {/* 放弃更改按钮 */}
               <Button
                 onClick={handleDiscard}
-                size="default"
                 variant="ghost"
-                className="h-9 px-4 text-sm font-medium text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
+                className="text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
                 disabled={isApplying || isUndoing}
               >
                 <XIcon className="mr-2 h-4 w-4" />
@@ -516,8 +521,7 @@ function App(): React.JSX.Element {
               {/* 确认应用按钮 */}
               <Button
                 onClick={handleApply}
-                size="default"
-                className="h-9 px-5 text-sm font-medium bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+                className="px-5 bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
                 disabled={isApplying || isUndoing}
               >
                 {isApplying ? (
@@ -537,20 +541,14 @@ function App(): React.JSX.Element {
             /* 输入模式：显示生成按钮 */
             <>
               {isRenaming ? (
-                <Button
-                  onClick={stopRenaming}
-                  size="default"
-                  variant="destructive"
-                  className="h-9 px-5 text-sm font-medium"
-                >
+                <Button onClick={stopRenaming} variant="destructive" className="px-5">
                   <SquareIcon className="mr-2 h-4 w-4" />
                   停止
                 </Button>
               ) : (
                 <Button
                   onClick={handleRename}
-                  size="default"
-                  className="h-9 px-5 text-sm font-medium"
+                  className="px-5"
                   disabled={isEmpty || !instruction.trim() || isApplying || isUndoing}
                 >
                   <SparklesIcon className="mr-2 h-4 w-4" />

@@ -7,6 +7,8 @@
 // 类型定义
 // ============================================================================
 
+import type { AIChatResponse, AIChatSettings, ChatMessage } from '@shared/ipc-types';
+
 export type AIProvider = 'openai' | 'deepseek' | 'custom';
 
 export interface AIServiceConfig {
@@ -18,11 +20,6 @@ export interface AIServiceConfig {
   jsonMode: boolean;
   /** 最大 token 数，防止 JSON 被截断 */
   maxTokens: number;
-}
-
-interface ChatMessage {
-  role: 'system' | 'user' | 'assistant';
-  content: string;
 }
 
 // ============================================================================
@@ -154,8 +151,8 @@ export async function generateNewNames(
   ];
 
   // 通过 IPC 调用主进程
-  const response = await window.api.askAI(
-    { apiKey, baseURL, model, jsonMode, maxTokens },
+  const response: AIChatResponse = await window.api.askAI(
+    { apiKey, baseURL, model, jsonMode, maxTokens } satisfies AIChatSettings,
     messages
   );
 

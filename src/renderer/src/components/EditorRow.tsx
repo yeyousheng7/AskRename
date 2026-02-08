@@ -3,6 +3,7 @@ import { diffChars } from 'diff';
 import TextareaAutosize from 'react-textarea-autosize';
 import { Undo2 } from 'lucide-react';
 import type { FileItem } from '@/types/file';
+import { cn } from '@/lib/utils';
 
 const textStyles = 'font-mono text-sm leading-6';
 
@@ -54,7 +55,7 @@ function DiffAddedText({
 
   return (
     <div
-      className={`${textStyles} min-h-6 cursor-text text-zinc-800 dark:text-zinc-200`}
+      className={cn(textStyles, 'min-h-6 cursor-text text-zinc-800 dark:text-zinc-200')}
       onClick={onClick}
     >
       {parts.map((part, index) => {
@@ -158,8 +159,10 @@ export default function EditorRow({
 
   return (
     <div
-      className={`grid grid-cols-[3rem_1fr_3rem_1fr] border-b border-zinc-100 dark:border-zinc-800 transition-colors ${isHovered ? 'bg-blue-50/80 dark:bg-blue-950/20' : ''
-        }`}
+      className={cn(
+        'grid grid-cols-[3rem_1fr_3rem_1fr] border-b border-zinc-100 dark:border-zinc-800 transition-colors',
+        isHovered && 'bg-blue-50/80 dark:bg-blue-950/20'
+      )}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
@@ -202,7 +205,10 @@ export default function EditorRow({
             onKeyDown={handleKeyDown}
             onBlur={stopEditing}
             autoFocus
-            className={`w-full bg-transparent resize-none focus:outline-none ${textStyles} text-zinc-800 dark:text-zinc-200`}
+            className={cn(
+              'w-full bg-transparent resize-none focus:outline-none text-zinc-800 dark:text-zinc-200',
+              textStyles
+            )}
             minRows={1}
           />
         ) : (

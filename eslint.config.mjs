@@ -28,5 +28,15 @@ export default defineConfig(
       ...eslintPluginReactRefresh.configs.vite.rules
     }
   },
+  {
+    files: [
+      'src/renderer/src/hooks/**/*.{ts,tsx}',
+      'src/renderer/src/lib/**/*.{ts,tsx}',
+      'src/renderer/src/types/**/*.{ts,tsx}'
+    ],
+    rules: {
+      'react-refresh/only-export-components': 'off'
+    }
+  },
   eslintConfigPrettier
 );

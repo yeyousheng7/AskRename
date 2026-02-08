@@ -1,11 +1,13 @@
 import { useCallback, useRef, useState, type DragEvent } from 'react';
 import type { FileItem } from '@/types/file';
 import { generateNewNames, getConfigFromEnv } from '@/lib/ai-service';
+import { ensureExtension } from '@/lib/filename';
+import type { RenameError, RenameFileItem, RenameResult, RenamedItem } from '@shared/ipc-types';
 
 function isAbsolutePathLike(p: string): boolean {
   if (!p) return false;
   // Windows: C:\ or C:/, or UNC \\server\share
-  if (/^[a-zA-Z]:[\\\/]/.test(p) || /^\\\\/.test(p)) return true;
+  if (/^[a-zA-Z]:[\\/]/.test(p) || /^\\\\/.test(p)) return true;
   // POSIX: /home/...
   return p.startsWith('/');
 }
@@ -62,8 +64,6 @@ function getElectronFilePath(file: File): string {
   return (legacy.path || '').trim();
 }
 
-type RenamedItem = { oldPath: string; newPath: string };
-
 // 历史记录项：用于撤销操作
 export type HistoryItem = {
   /** 操作时间戳 */
@@ -92,7 +92,7 @@ export type UseFileStoreResult = {
   stopRenaming: () => void;
   applyRename: () => Promise<{
     successCount: number;
-    errors: { path: string; error: string }[];
+    errors: RenameError[];
     renamed?: RenamedItem[];
   }>;
   resetAfterApply: (renamed?: RenamedItem[]) => void;
@@ -148,9 +148,7 @@ export function useFileStore(): UseFileStoreResult {
   // 单行重置：将指定索引的文件 renamed 重置为 original
   const revertFileName = useCallback((index: number) => {
     setFiles((prev) =>
-      prev.map((file, i) =>
-        i === index ? { ...file, renamed: file.original } : file
-      )
+      prev.map((file, i) => (i === index ? { ...file, renamed: file.original } : file))
     );
   }, []);
 
@@ -244,47 +242,17 @@ export function useFileStore(): UseFileStoreResult {
 
   const applyRename = useCallback(async () => {
     if (files.length === 0 || !hasChanges) {
-      return { successCount: 0, errors: [] };
+      return { successCount: 0, errors: [] as RenameError[], renamed: [] as RenamedItem[] };
     }
 
     setIsApplying(true);
 
     try {
-      // 构建重命名列表：只处理有变化的文件
-      // 只传 newName，由主进程负责拼接路径，避免 Windows 分隔符/盘符在 renderer 端出错
-      const localErrors: { path: string; error: string }[] = [];
-
-      // 辅助函数：获取扩展名（包含点号）
-      const getExtension = (name: string): string => {
-        const lastDot = name.lastIndexOf('.');
-        // 确保点号不在开头且后面有内容
-        if (lastDot > 0 && lastDot < name.length - 1) {
-          return name.slice(lastDot);
-        }
-        return '';
-      };
-
-      // 辅助函数：智能补全扩展名
-      const ensureExtension = (newName: string, originalName: string): string => {
-        const newExt = getExtension(newName);
-        const origExt = getExtension(originalName);
-
-        // 如果 newName 已有扩展名，保持不变（尊重用户意图）
-        if (newExt) {
-          return newName;
-        }
-
-        // 如果 newName 没有扩展名但 original 有，自动补全
-        if (!newExt && origExt) {
-          return newName + origExt;
-        }
-
-        return newName;
-      };
+      const localErrors: RenameError[] = [];
 
       const renameList = files
         .filter((file) => file.original !== file.renamed)
-        .flatMap((file) => {
+        .flatMap((file): RenameFileItem[] => {
           if (!isAbsolutePathLike(file.path)) {
             localErrors.push({
               path: file.path || file.original,
@@ -293,8 +261,21 @@ export function useFileStore(): UseFileStoreResult {
             return [];
           }
 
-          // 智能扩展名补全
           const finalName = ensureExtension(file.renamed, file.original);
+          if (finalName.split(/[/\\]/).length > 1) {
+            localErrors.push({
+              path: file.path,
+              error: '新文件名不能包含路径分隔符'
+            });
+            return [];
+          }
+          if (!finalName.trim()) {
+            localErrors.push({
+              path: file.path,
+              error: '新文件名不能为空'
+            });
+            return [];
+          }
 
           return [
             {
@@ -309,7 +290,7 @@ export function useFileStore(): UseFileStoreResult {
       }
 
       // 调用主进程执行重命名
-      const result = await window.api.applyRename(renameList);
+      const result: RenameResult = await window.api.applyRename(renameList);
 
       // 如果有成功的重命名，保存到历史记录（用于撤销）
       if (result.renamed && result.renamed.length > 0) {
