@@ -1,4 +1,5 @@
 import { useCallback, useState, type DragEvent } from 'react'
+import type { FileItem } from '@/types/file'
 
 // Electron 扩展的 File 类型（包含 path 属性）
 interface ElectronFile extends File {
@@ -6,13 +7,6 @@ interface ElectronFile extends File {
 }
 
 // 文件数据类型
-export interface FileItem {
-  id: string
-  original: string
-  renamed: string
-  path: string
-}
-
 export type UseFileStoreResult = {
   files: FileItem[]
   addFiles: (newFiles: FileItem[]) => void

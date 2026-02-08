@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState, type KeyboardEvent } from 'react'
 import { diffChars } from 'diff'
 import TextareaAutosize from 'react-textarea-autosize'
-import type { FileItem } from '@/hooks/useFileStore'
+import type { FileItem } from '@/types/file'
 
 const textStyles = 'font-mono text-sm leading-6'
 
