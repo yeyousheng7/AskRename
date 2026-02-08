@@ -1,104 +1,12 @@
-import { useState, useMemo, useCallback, useRef, DragEvent, KeyboardEvent } from 'react'
-import { diffChars } from 'diff'
-import TextareaAutosize from 'react-textarea-autosize'
+import { useState, useCallback, type DragEvent } from 'react'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { SparklesIcon, UploadIcon } from 'lucide-react'
+import { useFileStore } from '@/hooks/useFileStore'
+import EditorRow from '@/components/EditorRow'
 
-// Electron 扩展的 File 类型（包含 path 属性）
-interface ElectronFile extends File {
-  path: string
-}
-
-// 文件数据类型
-interface FileItem {
-  id: string
-  original: string
-  renamed: string
-  path: string
-}
-
-// 共享的文本样式 - 确保 DiffView 和 Textarea 视觉一致
-const textStyles = "font-mono text-sm leading-6"
-
-// Diff 渲染组件 - 左侧显示删除部分
-function DiffRemovedText({ original, renamed }: { original: string; renamed: string }) {
-  const parts = useMemo(() => diffChars(original, renamed), [original, renamed])
-
-  return (
-    <span className={textStyles}>
-      {parts.map((part, index) => {
-        if (part.added) {
-          return null
-        }
-        if (part.removed) {
-          return (
-            <span
-              key={index}
-              className="bg-red-50 text-red-600 line-through decoration-red-300 dark:bg-red-950/30 dark:text-red-400"
-            >
-              {part.value}
-            </span>
-          )
-        }
-        return (
-          <span key={index} className="text-slate-600 dark:text-slate-400">
-            {part.value}
-          </span>
-        )
-      })}
-    </span>
-  )
-}
-
-// Diff 渲染组件 - 右侧显示新增部分 (可点击)
-function DiffAddedText({
-  original,
-  renamed,
-  onClick
-}: {
-  original: string
-  renamed: string
-  onClick: () => void
-}) {
-  const parts = useMemo(() => diffChars(original, renamed), [original, renamed])
-
-  return (
-    <div
-      className={`${textStyles} min-h-6 cursor-text text-slate-800 dark:text-slate-200`}
-      onClick={onClick}
-    >
-      {parts.map((part, index) => {
-        if (part.removed) {
-          return null
-        }
-        if (part.added) {
-          return (
-            <span
-              key={index}
-              className="bg-emerald-50 text-emerald-600 dark:bg-emerald-950/30 dark:text-emerald-400"
-            >
-              {part.value}
-            </span>
-          )
-        }
-        return (
-          <span key={index}>
-            {part.value}
-          </span>
-        )
-      })}
-      {/* 如果为空，显示占位符 */}
-      {renamed.length === 0 && (
-        <span className="text-slate-300 dark:text-slate-600 italic">点击编辑...</span>
-      )}
-    </div>
-  )
-}
-
-// 空状态组件
-function EmptyState() {
+function EmptyState(): React.JSX.Element {
   return (
     <div className="flex flex-1 items-center justify-center">
       <div className="flex flex-col items-center gap-4 text-slate-400 dark:text-slate-500">
@@ -120,98 +28,13 @@ function EmptyState() {
 
 function App(): React.JSX.Element {
   const [instruction, setInstruction] = useState('')
-  const [files, setFiles] = useState<FileItem[]>([])
-  const [hoveredLine, setHoveredLine] = useState<number | null>(null)
+  const { files, updateFileName, handleDrop } = useFileStore()
   const [isDragging, setIsDragging] = useState(false)
   const [editingIndex, setEditingIndex] = useState<number | null>(null)
-  const textareaRefs = useRef<(HTMLTextAreaElement | null)[]>([])
 
   const handleRename = (): void => {
     console.log('开始重命名，指令:', instruction)
   }
-
-  // 处理单个文件名的编辑
-  const handleFileRename = useCallback((id: string, newName: string) => {
-    setFiles(prev => prev.map(file =>
-      file.id === id ? { ...file, renamed: newName } : file
-    ))
-  }, [])
-
-  // 开始编辑
-  const startEditing = useCallback((index: number) => {
-    setEditingIndex(index)
-  }, [])
-
-  // 结束编辑
-  const stopEditing = useCallback(() => {
-    setEditingIndex(null)
-  }, [])
-
-  // 处理键盘事件
-  const handleKeyDown = useCallback((e: KeyboardEvent<HTMLTextAreaElement>, index: number) => {
-    const textarea = e.currentTarget
-    const { selectionStart, selectionEnd, value } = textarea
-
-    // Enter 键完成编辑（不换行）
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      stopEditing()
-      return
-    }
-
-    // Escape 键取消编辑
-    if (e.key === 'Escape') {
-      e.preventDefault()
-      stopEditing()
-      return
-    }
-
-    // 确保没有选中文本
-    if (selectionStart !== selectionEnd) return
-
-    if (e.key === 'ArrowUp') {
-      const textBeforeCursor = value.substring(0, selectionStart)
-      const isFirstLine = !textBeforeCursor.includes('\n')
-
-      if (isFirstLine && index > 0) {
-        e.preventDefault()
-        setEditingIndex(index - 1)
-      }
-    } else if (e.key === 'ArrowDown') {
-      const textAfterCursor = value.substring(selectionStart)
-      const isLastLine = !textAfterCursor.includes('\n')
-
-      if (isLastLine && index < files.length - 1) {
-        e.preventDefault()
-        setEditingIndex(index + 1)
-      }
-    }
-  }, [files.length, stopEditing])
-
-  // 处理文件拖入
-  const handleDrop = useCallback((e: DragEvent<HTMLDivElement>) => {
-    e.preventDefault()
-    e.stopPropagation()
-    setIsDragging(false)
-
-    const droppedFiles = Array.from(e.dataTransfer.files)
-
-    const newFiles: FileItem[] = droppedFiles
-      .filter(file => file.size > 0)
-      .map(file => {
-        const electronFile = file as ElectronFile
-        return {
-          id: `${file.name}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-          original: file.name,
-          renamed: file.name,
-          path: electronFile.path || file.name,
-        }
-      })
-
-    if (newFiles.length > 0) {
-      setFiles(prev => [...prev, ...newFiles])
-    }
-  }, [])
 
   const handleDragOver = useCallback((e: DragEvent<HTMLDivElement>) => {
     e.preventDefault()
@@ -236,14 +59,15 @@ function App(): React.JSX.Element {
 
   return (
     <div
-      className={`flex h-screen w-screen flex-col bg-white dark:bg-slate-950 transition-colors ${isDragging ? 'bg-blue-50/50 dark:bg-blue-950/20' : ''
-        }`}
-      onDrop={handleDrop}
+      className={`flex h-screen w-screen flex-col bg-white dark:bg-slate-950 transition-colors ${isDragging ? 'bg-blue-50/50 dark:bg-blue-950/20' : ''}`}
+      onDrop={(e) => {
+        setIsDragging(false)
+        handleDrop(e)
+      }}
       onDragOver={handleDragOver}
       onDragEnter={handleDragEnter}
       onDragLeave={handleDragLeave}
     >
-      {/* 拖拽遮罩层 */}
       {isDragging && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-blue-500/10 backdrop-blur-sm border-2 border-dashed border-blue-400 rounded-lg m-2">
           <div className="flex flex-col items-center gap-3 text-blue-500">
@@ -253,7 +77,6 @@ function App(): React.JSX.Element {
         </div>
       )}
 
-      {/* Header - Grid 布局标题 */}
       <div className="flex-shrink-0 grid grid-cols-[3rem_1fr_3rem_1fr] border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900">
         <div className="h-8 border-r border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800" />
         <div className="flex h-8 items-center border-r border-slate-200 dark:border-slate-700 px-3">
@@ -277,71 +100,26 @@ function App(): React.JSX.Element {
         </div>
       </div>
 
-      {/* Editor Area 或 Empty State */}
       {isEmpty ? (
         <EmptyState />
       ) : (
         <ScrollArea className="flex-1">
           <div className="min-h-full">
             {files.map((file, index) => (
-              <div
+              <EditorRow
                 key={file.id}
-                className={`grid grid-cols-[3rem_1fr_3rem_1fr] border-b border-slate-100 dark:border-slate-800 transition-colors ${hoveredLine === index
-                    ? 'bg-blue-50/80 dark:bg-blue-900/20'
-                    : ''
-                  }`}
-                onMouseEnter={() => setHoveredLine(index)}
-                onMouseLeave={() => setHoveredLine(null)}
-              >
-                {/* 左行号 */}
-                <div className="flex items-start justify-end border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 pr-3 py-1.5">
-                  <span className="font-mono text-xs text-slate-400 dark:text-slate-500 select-none leading-6">
-                    {index + 1}
-                  </span>
-                </div>
-
-                {/* 左原名 (只读) */}
-                <div className="border-r border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/50 px-3 py-1.5">
-                  <DiffRemovedText original={file.original} renamed={file.renamed} />
-                </div>
-
-                {/* 右行号 */}
-                <div className="flex items-start justify-end border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 pr-3 py-1.5">
-                  <span className="font-mono text-xs text-slate-400 dark:text-slate-500 select-none leading-6">
-                    {index + 1}
-                  </span>
-                </div>
-
-                {/* 右编辑区 - 查看/编辑模式切换 */}
-                <div className="px-3 py-1.5 bg-white dark:bg-slate-950">
-                  {editingIndex === index ? (
-                    // 编辑模式 - Textarea
-                    <TextareaAutosize
-                      ref={(el) => { textareaRefs.current[index] = el }}
-                      value={file.renamed}
-                      onChange={(e) => handleFileRename(file.id, e.target.value)}
-                      onKeyDown={(e) => handleKeyDown(e, index)}
-                      onBlur={stopEditing}
-                      autoFocus
-                      className={`w-full bg-transparent resize-none focus:outline-none ${textStyles} text-slate-800 dark:text-slate-200`}
-                      minRows={1}
-                    />
-                  ) : (
-                    // 查看模式 - Diff 高亮
-                    <DiffAddedText
-                      original={file.original}
-                      renamed={file.renamed}
-                      onClick={() => startEditing(index)}
-                    />
-                  )}
-                </div>
-              </div>
+                file={file}
+                index={index}
+                filesLength={files.length}
+                editingIndex={editingIndex}
+                setEditingIndex={setEditingIndex}
+                onRename={updateFileName}
+              />
             ))}
           </div>
         </ScrollArea>
       )}
 
-      {/* Bottom Footer - 浮动操作台 */}
       <footer className="flex-shrink-0 border-t border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-sm p-3">
         <div className="flex items-center gap-3">
           <Input
