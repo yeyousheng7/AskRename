@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
+import { diffChars } from 'diff'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -18,9 +19,70 @@ const mockFiles = [
   { id: 10, original: 'report.docx', renamed: 'quarterly_report_q1.docx' },
 ]
 
+// Diff 渲染组件 - 左侧显示删除部分
+function DiffRemovedText({ original, renamed }: { original: string; renamed: string }) {
+  const parts = useMemo(() => diffChars(original, renamed), [original, renamed])
+
+  return (
+    <span className="font-mono text-sm">
+      {parts.map((part, index) => {
+        if (part.added) {
+          return null // 不在左侧显示新增部分
+        }
+        if (part.removed) {
+          return (
+            <span
+              key={index}
+              className="bg-red-100 text-red-700 line-through dark:bg-red-900/30 dark:text-red-400"
+            >
+              {part.value}
+            </span>
+          )
+        }
+        return (
+          <span key={index} className="text-neutral-600 dark:text-neutral-400">
+            {part.value}
+          </span>
+        )
+      })}
+    </span>
+  )
+}
+
+// Diff 渲染组件 - 右侧显示新增部分
+function DiffAddedText({ original, renamed }: { original: string; renamed: string }) {
+  const parts = useMemo(() => diffChars(original, renamed), [original, renamed])
+
+  return (
+    <span className="font-mono text-sm">
+      {parts.map((part, index) => {
+        if (part.removed) {
+          return null // 不在右侧显示删除部分
+        }
+        if (part.added) {
+          return (
+            <span
+              key={index}
+              className="bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+            >
+              {part.value}
+            </span>
+          )
+        }
+        return (
+          <span key={index} className="text-neutral-900 dark:text-neutral-100">
+            {part.value}
+          </span>
+        )
+      })}
+    </span>
+  )
+}
+
 function App(): React.JSX.Element {
   const [instruction, setInstruction] = useState('')
   const [files] = useState(mockFiles)
+  const [hoveredLine, setHoveredLine] = useState<number | null>(null)
 
   const handleRename = (): void => {
     console.log('开始重命名，指令:', instruction)
@@ -31,14 +93,14 @@ function App(): React.JSX.Element {
       {/* Pane Headers */}
       <div className="flex flex-shrink-0 border-b border-neutral-200 dark:border-neutral-700">
         {/* Left Header */}
-        <div className="w-1/2 border-r border-neutral-200 dark:border-neutral-700 bg-neutral-100 dark:bg-neutral-800 px-4 py-1.5">
-          <span className="font-mono text-xs text-neutral-500 dark:text-neutral-400">
+        <div className="w-1/2 border-r border-neutral-200 dark:border-neutral-700 bg-slate-100 dark:bg-slate-800 px-4 py-1.5">
+          <span className="font-mono text-xs text-slate-500 dark:text-slate-400">
             原始文本 (只读)
           </span>
         </div>
         {/* Right Header */}
-        <div className="w-1/2 bg-neutral-100 dark:bg-neutral-800 px-4 py-1.5">
-          <span className="font-mono text-xs text-neutral-500 dark:text-neutral-400">
+        <div className="w-1/2 bg-slate-100 dark:bg-slate-800 px-4 py-1.5">
+          <span className="font-mono text-xs text-slate-500 dark:text-slate-400">
             预览文本
           </span>
         </div>
@@ -49,17 +111,27 @@ function App(): React.JSX.Element {
         <div className="flex min-h-full">
           {/* Left Pane - 原始文本 (只读) */}
           <div className="w-1/2 border-r border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-900/50">
-            <div className="py-2">
+            <div className="py-1">
               {files.map((file, index) => (
-                <div key={file.id} className="flex h-6 items-center hover:bg-neutral-100 dark:hover:bg-neutral-800/50">
-                  {/* 行号 */}
-                  <span className="w-10 flex-shrink-0 pr-3 text-right font-mono text-xs text-neutral-300 dark:text-neutral-600 select-none">
-                    {index + 1}
-                  </span>
-                  {/* 文件名 */}
-                  <span className="font-mono text-sm text-neutral-600 dark:text-neutral-400">
-                    {file.original}
-                  </span>
+                <div
+                  key={file.id}
+                  className={`flex h-7 items-center transition-colors ${hoveredLine === index
+                      ? 'bg-blue-50 dark:bg-blue-900/20'
+                      : 'hover:bg-neutral-100 dark:hover:bg-neutral-800/50'
+                    }`}
+                  onMouseEnter={() => setHoveredLine(index)}
+                  onMouseLeave={() => setHoveredLine(null)}
+                >
+                  {/* 行号区域 (Gutter) */}
+                  <div className="w-12 flex-shrink-0 border-r border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800/50 pr-3 h-full flex items-center justify-end">
+                    <span className="font-mono text-xs text-slate-400 dark:text-slate-500 select-none">
+                      {index + 1}
+                    </span>
+                  </div>
+                  {/* 文件名 - Diff 删除高亮 */}
+                  <div className="pl-3 pr-2 min-w-0 flex-1">
+                    <DiffRemovedText original={file.original} renamed={file.renamed} />
+                  </div>
                 </div>
               ))}
             </div>
@@ -67,17 +139,27 @@ function App(): React.JSX.Element {
 
           {/* Right Pane - 预览文本 */}
           <div className="w-1/2 bg-white dark:bg-neutral-900">
-            <div className="py-2">
+            <div className="py-1">
               {files.map((file, index) => (
-                <div key={file.id} className="flex h-6 items-center hover:bg-blue-50 dark:hover:bg-blue-900/20">
-                  {/* 行号 */}
-                  <span className="w-10 flex-shrink-0 pr-3 text-right font-mono text-xs text-neutral-300 dark:text-neutral-600 select-none">
-                    {index + 1}
-                  </span>
-                  {/* 文件名 */}
-                  <span className="font-mono text-sm text-neutral-900 dark:text-neutral-100">
-                    {file.renamed}
-                  </span>
+                <div
+                  key={file.id}
+                  className={`flex h-7 items-center transition-colors ${hoveredLine === index
+                      ? 'bg-blue-50 dark:bg-blue-900/20'
+                      : 'hover:bg-neutral-50 dark:hover:bg-neutral-800/30'
+                    }`}
+                  onMouseEnter={() => setHoveredLine(index)}
+                  onMouseLeave={() => setHoveredLine(null)}
+                >
+                  {/* 行号区域 (Gutter) */}
+                  <div className="w-12 flex-shrink-0 border-r border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800/50 pr-3 h-full flex items-center justify-end">
+                    <span className="font-mono text-xs text-slate-400 dark:text-slate-500 select-none">
+                      {index + 1}
+                    </span>
+                  </div>
+                  {/* 文件名 - Diff 新增高亮 */}
+                  <div className="pl-3 pr-2 min-w-0 flex-1">
+                    <DiffAddedText original={file.original} renamed={file.renamed} />
+                  </div>
                 </div>
               ))}
             </div>
@@ -86,7 +168,7 @@ function App(): React.JSX.Element {
       </ScrollArea>
 
       {/* Bottom Footer - 输入区域 */}
-      <footer className="flex-shrink-0 border-t border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 p-3">
+      <footer className="flex-shrink-0 border-t border-neutral-200 dark:border-neutral-700 bg-slate-50 dark:bg-slate-800 p-3">
         <div className="flex items-center gap-3">
           <Input
             type="text"
