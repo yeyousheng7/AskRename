@@ -1,12 +1,6 @@
 import { useCallback, useRef, useState, type DragEvent } from 'react';
 import type { FileItem } from '@/types/file';
 import { generateNewNames, getConfigFromEnv } from '@/lib/ai-service';
-import * as path from 'path-browserify';
-
-type PathApi = {
-  dirname: (p: string) => string;
-  join: (...parts: string[]) => string;
-};
 
 function isAbsolutePathLike(p: string): boolean {
   if (!p) return false;
@@ -14,15 +8,6 @@ function isAbsolutePathLike(p: string): boolean {
   if (/^[a-zA-Z]:[\\/]/.test(p) || /^\\\\/.test(p)) return true;
   // POSIX: /home/...
   return p.startsWith('/');
-}
-
-function getPathApi(filePath: string): PathApi {
-  // renderer 中无法可靠拿到 process.platform，且 path-browserify 默认偏 posix；
-  // 用简单规则判断是否是 Windows 风格路径。
-  const looksLikeWindows = /^[a-zA-Z]:\\/.test(filePath) || filePath.includes('\\');
-  const win32Api = 'win32' in path ? (path.win32 as unknown as PathApi | null) : null;
-  if (looksLikeWindows && win32Api) return win32Api;
-  return path.posix;
 }
 
 function extractFilePathsFromDataTransfer(dt: DataTransfer): string[] {
@@ -77,10 +62,7 @@ function getElectronFilePath(file: File): string {
   return (legacy.path || '').trim();
 }
 
-// Electron 扩展的 File 类型（包含 path 属性）
-interface ElectronFile extends File {
-  path: string;
-}
+type RenamedItem = { oldPath: string; newPath: string };
 
 // Hook 返回类型
 export type UseFileStoreResult = {
@@ -95,8 +77,12 @@ export type UseFileStoreResult = {
   handleDrop: (e: DragEvent<HTMLDivElement>) => void;
   startRenaming: (instruction: string) => Promise<void>;
   stopRenaming: () => void;
-  applyRename: () => Promise<{ successCount: number; errors: { path: string; error: string }[] }>;
-  resetAfterApply: () => void;
+  applyRename: () => Promise<{
+    successCount: number;
+    errors: { path: string; error: string }[];
+    renamed?: RenamedItem[];
+  }>;
+  resetAfterApply: (renamed?: RenamedItem[]) => void;
 };
 
 export function useFileStore(): UseFileStoreResult {
@@ -136,22 +122,22 @@ export function useFileStore(): UseFileStoreResult {
       e.stopPropagation();
 
       const droppedFiles = Array.from(e.dataTransfer.files);
-      const fallbackPaths = extractFilePathsFromDataTransfer(e.dataTransfer);
+      const rawPaths = droppedFiles.map((f) => getElectronFilePath(f));
+      const needsFallback = rawPaths.some((p) => !isAbsolutePathLike(p));
+      const fallbackPaths = needsFallback ? extractFilePathsFromDataTransfer(e.dataTransfer) : [];
 
-      const newFiles: FileItem[] = droppedFiles
-        .map((file, index) => {
-          const electronFile = file as ElectronFile;
-          const rawPath = getElectronFilePath(file) || (electronFile.path || '').trim();
-          const pathFromUri = fallbackPaths[index] || '';
-          const finalPath = isAbsolutePathLike(rawPath) ? rawPath : pathFromUri;
+      const newFiles: FileItem[] = droppedFiles.map((file, index) => {
+        const rawPath = rawPaths[index] || '';
+        const pathFromUri = fallbackPaths[index] || '';
+        const finalPath = isAbsolutePathLike(rawPath) ? rawPath : pathFromUri;
 
-          return {
-            id: `${file.name}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-            original: file.name,
-            renamed: file.name,
-            path: finalPath || file.name
-          };
-        });
+        return {
+          id: `${file.name}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          original: file.name,
+          renamed: file.name,
+          path: finalPath || file.name
+        };
+      });
 
       addFiles(newFiles);
     },
@@ -238,28 +224,30 @@ export function useFileStore(): UseFileStoreResult {
         });
 
       if (renameList.length === 0) {
-        return { successCount: 0, errors: localErrors };
+        return { successCount: 0, errors: localErrors, renamed: [] };
       }
 
       // 调用主进程执行重命名
       const result = await window.api.applyRename(renameList);
-      return { successCount: result.successCount, errors: [...localErrors, ...result.errors] };
+      return {
+        successCount: result.successCount,
+        errors: [...localErrors, ...result.errors],
+        renamed: result.renamed
+      };
     } finally {
       setIsApplying(false);
     }
   }, [files, hasChanges]);
 
   // 重命名成功后重置列表
-  const resetAfterApply = useCallback(() => {
+  const resetAfterApply = useCallback((renamed?: RenamedItem[]) => {
+    const pathMap = new Map((renamed || []).map((r) => [r.oldPath, r.newPath]));
     setFiles((prev) =>
       prev.map((file) => ({
         ...file,
         original: file.renamed,
-        // 更新 path 为新路径（兼容 Windows/posix）
-        path: (() => {
-          const pathApi = getPathApi(file.path);
-          return pathApi.join(pathApi.dirname(file.path), file.renamed);
-        })()
+        // 由主进程返回 newPath，避免 renderer 端路径处理差异
+        path: pathMap.get(file.path) || file.path
       }))
     );
   }, []);

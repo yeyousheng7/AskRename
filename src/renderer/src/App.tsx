@@ -124,7 +124,7 @@ function App(): React.JSX.Element {
       } else if (result.successCount > 0) {
         showToast(`成功重命名 ${result.successCount} 个文件`, 'success');
         // 重置列表，准备下一轮
-        resetAfterApply();
+        resetAfterApply(result.renamed);
         setInstruction('');
       }
     } catch (err) {

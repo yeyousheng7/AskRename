@@ -42,6 +42,7 @@ interface RenameError {
 interface RenameResult {
   successCount: number;
   errors: RenameError[];
+  renamed?: { oldPath: string; newPath: string }[];
 }
 
 // ============================================================================
@@ -55,9 +56,7 @@ const api = {
    */
   getPathForFile: (file: File): string => {
     try {
-      if (webUtils && typeof webUtils.getPathForFile === 'function') {
-        return webUtils.getPathForFile(file);
-      }
+      return webUtils.getPathForFile(file);
     } catch {
       // ignore and fall back
     }

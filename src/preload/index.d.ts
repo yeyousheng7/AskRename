@@ -35,6 +35,7 @@ interface RenameError {
 interface RenameResult {
   successCount: number;
   errors: RenameError[];
+  renamed?: { oldPath: string; newPath: string }[];
 }
 
 interface CustomAPI {

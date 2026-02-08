@@ -101,8 +101,13 @@ function isValidWindowsFileName(name: string): { ok: true } | { ok: false; reaso
   }
 
   // Windows 禁止字符（含控制字符）
-  if (/[<>:"/\\|?*\x00-\x1F]/.test(trimmed)) {
+  if (/[<>:"/\\|?*]/.test(trimmed)) {
     return { ok: false, reason: '文件名包含 Windows 禁止字符' };
+  }
+  for (const ch of trimmed) {
+    if (ch.charCodeAt(0) < 32) {
+      return { ok: false, reason: '文件名包含控制字符' };
+    }
   }
 
   // 保留设备名（带扩展名也不允许，例如 CON.txt）
