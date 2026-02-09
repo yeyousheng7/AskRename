@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState, type DragEvent } from 'react';
 import type { FileItem } from '@/types/file';
-import { generateNewNames, getConfigFromEnv } from '@/lib/ai-service';
+import { generateNewNames, type AIServiceConfig } from '@/lib/ai-service';
 import { ensureExtension } from '@/lib/filename';
 import type { RenameError, RenameFileItem, RenameResult, RenamedItem } from '@shared/ipc-types';
 
@@ -88,7 +88,7 @@ export type UseFileStoreResult = {
   revertFileName: (index: number) => void;
   applyRule: (handler: (name: string, index: number) => string) => void;
   handleDrop: (e: DragEvent<HTMLDivElement>) => void;
-  startRenaming: (instruction: string) => Promise<void>;
+  startRenaming: (instruction: string, config?: Partial<AIServiceConfig>) => Promise<void>;
   stopRenaming: () => void;
   applyRename: () => Promise<{
     successCount: number;
@@ -199,14 +199,7 @@ export function useFileStore(): UseFileStoreResult {
   }, []);
 
   const startRenaming = useCallback(
-    async (instruction: string) => {
-      // 检查 API Key
-      const config = getConfigFromEnv();
-      if (!config.apiKey) {
-        console.warn('API Key 未配置，请在 .env 文件中设置 VITE_AI_API_KEY');
-        throw new Error('API Key 未配置');
-      }
-
+    async (instruction: string, config?: Partial<AIServiceConfig>) => {
       if (files.length === 0) {
         console.warn('没有文件可重命名');
         return;
@@ -224,7 +217,7 @@ export function useFileStore(): UseFileStoreResult {
 
       try {
         const originalNames = files.map((f) => f.original);
-        const newNames = await generateNewNames(originalNames, instruction);
+        const newNames = await generateNewNames(originalNames, instruction, config);
 
         // 检查是否被中断
         if (abortControllerRef.current?.signal.aborted) {

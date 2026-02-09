@@ -18,12 +18,15 @@ import {
   XIcon,
   Undo2Icon,
   WandIcon,
+  SettingsIcon,
   SunIcon,
   MoonIcon
 } from 'lucide-react';
 import { useFileStore } from '@/hooks/useFileStore';
 import { useTheme } from '@/hooks/useTheme';
+import { useSettings } from '@/hooks/useSettings';
 import EditorRow from '@/components/EditorRow';
+import { SettingsDialog } from '@/components/SettingsDialog';
 import { QUICK_ACTIONS, type QuickAction } from '@/lib/constants';
 import { cn } from '@/lib/utils';
 
@@ -175,11 +178,13 @@ function App(): React.JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
   const [isQuickActionsOpen, setIsQuickActionsOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const toastTimerRef = useRef<number | null>(null);
 
   const { resolvedTheme, toggleTheme } = useTheme();
+  const { settings, updateSettings } = useSettings();
 
   const {
     files,
@@ -216,6 +221,18 @@ function App(): React.JSX.Element {
     toastTimerRef.current = window.setTimeout(() => setToast(null), action ? 5000 : 3000);
   }, []);
 
+  const openSettings = useCallback(async () => {
+    setIsSettingsOpen(true);
+    if (settings.provider === 'ollama') return;
+    if (settings.apiKey.trim()) return;
+    try {
+      const saved = (await window.api.getApiKey(settings.provider)) || '';
+      if (saved.trim()) updateSettings({ apiKey: saved });
+    } catch (err) {
+      console.error('Failed to load api key:', err);
+    }
+  }, [settings.provider, settings.apiKey, updateSettings]);
+
   useEffect(() => {
     return () => {
       if (toastTimerRef.current) {
@@ -240,15 +257,46 @@ function App(): React.JSX.Element {
   const handleRename = useCallback(async () => {
     if (isRenaming || files.length === 0 || !instruction.trim()) return;
 
+    let apiKeyToUse = settings.apiKey.trim();
+    if (settings.provider !== 'ollama' && !apiKeyToUse) {
+      try {
+        apiKeyToUse = ((await window.api.getApiKey(settings.provider)) || '').trim();
+      } catch (err) {
+        console.error('Failed to load api key:', err);
+      }
+
+      if (!apiKeyToUse) {
+        void openSettings();
+        showToast('请先配置 API Key', 'error');
+        return;
+      }
+
+      updateSettings({ apiKey: apiKeyToUse });
+    }
+
     setError(null);
     try {
-      await startRenaming(instruction);
+      await startRenaming(instruction, {
+        provider: settings.provider,
+        apiKey: apiKeyToUse,
+        baseURL: settings.baseUrl,
+        model: settings.model
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : '重命名失败，请重试';
       setError(message);
       console.error('重命名失败:', err);
     }
-  }, [instruction, isRenaming, files.length, startRenaming]);
+  }, [
+    instruction,
+    isRenaming,
+    files.length,
+    openSettings,
+    settings,
+    showToast,
+    startRenaming,
+    updateSettings
+  ]);
 
   // 放弃更改
   const handleDiscard = useCallback(() => {
@@ -366,6 +414,13 @@ function App(): React.JSX.Element {
         />
       )}
 
+      <SettingsDialog
+        open={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        settings={settings}
+        updateSettings={updateSettings}
+      />
+
       {/* 拖放覆盖层 */}
       {isDragging && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-blue-500/10 backdrop-blur-sm border-2 border-dashed border-blue-400 rounded-lg m-2">
@@ -408,7 +463,14 @@ function App(): React.JSX.Element {
           )}
         </div>
         {/* 主题切换按钮 */}
-        <div className="flex items-center px-2 bg-zinc-50 dark:bg-zinc-900">
+        <div className="flex items-center gap-1 px-2 bg-zinc-50 dark:bg-zinc-900">
+          <button
+            onClick={() => void openSettings()}
+            className="p-1.5 rounded-md text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors"
+            title="设置"
+          >
+            <SettingsIcon className="h-4 w-4" />
+          </button>
           <button
             onClick={toggleTheme}
             className="p-1.5 rounded-md text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors"

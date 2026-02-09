@@ -3,12 +3,13 @@
  * 在主进程中处理 AI API 请求，绕过 CORS/CSP 限制
  */
 
-import { ipcMain } from 'electron';
+import { app, ipcMain, safeStorage } from 'electron';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import type {
   AIChatRequest,
   AIChatResponse,
+  AIProvider,
   RenameError,
   RenameFileItem,
   RenamedItem,
@@ -30,6 +31,48 @@ interface OpenAIChatResponse {
 // ============================================================================
 // IPC Handler 注册
 // ============================================================================
+
+type StoredSecretsV1 = {
+  version: 1;
+  apiKeys: Partial<Record<AIProvider, string>>;
+};
+
+const volatileApiKeys = new Map<AIProvider, string>();
+
+function isAIProvider(value: unknown): value is AIProvider {
+  return value === 'openai' || value === 'deepseek' || value === 'ollama' || value === 'custom';
+}
+
+function getSecretsFilePath(): string {
+  return path.join(app.getPath('userData'), 'ai-secrets.json');
+}
+
+async function readSecretsFile(): Promise<StoredSecretsV1> {
+  try {
+    const raw = await fs.readFile(getSecretsFilePath(), 'utf8');
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') throw new Error('invalid secrets');
+    const obj = parsed as Partial<StoredSecretsV1>;
+    if (obj.version !== 1 || !obj.apiKeys || typeof obj.apiKeys !== 'object') {
+      throw new Error('invalid secrets');
+    }
+
+    const apiKeys: StoredSecretsV1['apiKeys'] = {};
+    for (const [k, v] of Object.entries(obj.apiKeys as Record<string, unknown>)) {
+      if (!isAIProvider(k)) continue;
+      if (typeof v !== 'string') continue;
+      apiKeys[k] = v;
+    }
+
+    return { version: 1, apiKeys };
+  } catch {
+    return { version: 1, apiKeys: {} };
+  }
+}
+
+async function writeSecretsFile(next: StoredSecretsV1): Promise<void> {
+  await fs.writeFile(getSecretsFilePath(), JSON.stringify(next, null, 2), 'utf8');
+}
 
 function isWindowsPlatform(): boolean {
   return process.platform === 'win32';
@@ -115,15 +158,19 @@ export function registerAIHandlers(): void {
   // AI Chat Handler
   ipcMain.handle('ai:chat', async (_event, request: AIChatRequest): Promise<AIChatResponse> => {
     const { settings, messages } = request;
-    const { apiKey, baseURL, model, jsonMode, maxTokens } = settings;
+    const { provider, apiKey, baseURL, model, maxTokens } = settings;
 
     // 参数验证
-    if (!apiKey) {
-      return { success: false, error: 'API Key 未配置' };
-    }
-
     if (!baseURL) {
       return { success: false, error: 'API Base URL 未配置' };
+    }
+
+    if (!model) {
+      return { success: false, error: '模型名称未配置' };
+    }
+
+    if (provider !== 'ollama' && !apiKey) {
+      return { success: false, error: 'API Key 未配置' };
     }
 
     // 构建请求体
@@ -134,18 +181,18 @@ export function registerAIHandlers(): void {
       max_tokens: maxTokens
     };
 
-    if (jsonMode) {
-      requestBody.response_format = { type: 'json_object' };
-    }
-
     try {
       // 使用 Node.js fetch（Electron 18+ 内置）
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json'
+      };
+      if (apiKey) {
+        headers.Authorization = `Bearer ${apiKey}`;
+      }
+
       const response = await fetch(`${baseURL}/chat/completions`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${apiKey}`
-        },
+        headers,
         body: JSON.stringify(requestBody)
       });
 
@@ -173,6 +220,49 @@ export function registerAIHandlers(): void {
       return { success: false, error: `请求失败: ${message}` };
     }
   });
+
+  // Settings: secure API key storage (main process)
+  ipcMain.handle('settings:get-api-key', async (_event, provider: AIProvider): Promise<string> => {
+    if (!safeStorage.isEncryptionAvailable()) {
+      return volatileApiKeys.get(provider) || '';
+    }
+
+    const secrets = await readSecretsFile();
+    const encryptedBase64 = secrets.apiKeys[provider];
+    if (!encryptedBase64) return '';
+
+    try {
+      const decrypted = safeStorage.decryptString(Buffer.from(encryptedBase64, 'base64'));
+      return (decrypted || '').trim();
+    } catch {
+      return '';
+    }
+  });
+
+  ipcMain.handle(
+    'settings:set-api-key',
+    async (_event, payload: { provider: AIProvider; apiKey: string }): Promise<void> => {
+      const provider = payload.provider;
+      const apiKey = (payload.apiKey || '').trim();
+
+      if (!safeStorage.isEncryptionAvailable()) {
+        if (apiKey) volatileApiKeys.set(provider, apiKey);
+        else volatileApiKeys.delete(provider);
+        return;
+      }
+
+      const secrets = await readSecretsFile();
+      if (!apiKey) {
+        delete secrets.apiKeys[provider];
+        await writeSecretsFile(secrets);
+        return;
+      }
+
+      const encrypted = safeStorage.encryptString(apiKey);
+      secrets.apiKeys[provider] = encrypted.toString('base64');
+      await writeSecretsFile(secrets);
+    }
+  );
 
   // 文件重命名 Handler
   ipcMain.handle(

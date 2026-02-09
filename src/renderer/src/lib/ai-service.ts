@@ -9,7 +9,7 @@
 
 import type { AIChatResponse, AIChatSettings, ChatMessage } from '@shared/ipc-types';
 
-export type AIProvider = 'openai' | 'deepseek' | 'custom';
+export type AIProvider = 'openai' | 'deepseek' | 'ollama' | 'custom';
 
 export interface AIServiceConfig {
   provider: AIProvider;
@@ -30,7 +30,7 @@ const PROVIDER_PRESETS: Record<AIProvider, Omit<AIServiceConfig, 'apiKey'>> = {
   openai: {
     provider: 'openai',
     baseURL: 'https://api.openai.com/v1',
-    model: 'gpt-4o-mini',
+    model: 'gpt-4o',
     jsonMode: true,
     maxTokens: 4096
   },
@@ -39,6 +39,13 @@ const PROVIDER_PRESETS: Record<AIProvider, Omit<AIServiceConfig, 'apiKey'>> = {
     baseURL: 'https://api.deepseek.com',
     model: 'deepseek-chat',
     jsonMode: true,
+    maxTokens: 4096
+  },
+  ollama: {
+    provider: 'ollama',
+    baseURL: 'http://localhost:11434/v1',
+    model: 'llama3',
+    jsonMode: false,
     maxTokens: 4096
   },
   custom: {
@@ -106,6 +113,7 @@ export function getSupportedProviders(): { id: AIProvider; name: string }[] {
   return [
     { id: 'openai', name: 'OpenAI' },
     { id: 'deepseek', name: 'DeepSeek' },
+    { id: 'ollama', name: 'Ollama' },
     { id: 'custom', name: '自定义' }
   ];
 }
@@ -127,14 +135,18 @@ export async function generateNewNames(
   config?: Partial<AIServiceConfig>
 ): Promise<string[]> {
   const finalConfig: AIServiceConfig = { ...getConfigFromEnv(), ...config };
-  const { apiKey, baseURL, model, jsonMode, maxTokens } = finalConfig;
+  const { provider, apiKey, baseURL, model, jsonMode, maxTokens } = finalConfig;
 
-  if (!apiKey) {
+  if (provider !== 'ollama' && !apiKey) {
     throw new Error('API Key 未配置，请在设置中填写 API Key');
   }
 
   if (!baseURL) {
     throw new Error('API Base URL 未配置');
+  }
+
+  if (!model) {
+    throw new Error('模型名称未配置');
   }
 
   if (files.length === 0) {
@@ -152,7 +164,7 @@ export async function generateNewNames(
 
   // 通过 IPC 调用主进程
   const response: AIChatResponse = await window.api.askAI(
-    { apiKey, baseURL, model, jsonMode, maxTokens } satisfies AIChatSettings,
+    { provider, apiKey, baseURL, model, jsonMode, maxTokens } satisfies AIChatSettings,
     messages
   );
 

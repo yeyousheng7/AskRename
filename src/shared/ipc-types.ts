@@ -5,7 +5,10 @@ export interface ChatMessage {
   content: string;
 }
 
+export type AIProvider = 'openai' | 'deepseek' | 'ollama' | 'custom';
+
 export interface AIChatSettings {
+  provider: AIProvider;
   apiKey: string;
   baseURL: string;
   model: string;

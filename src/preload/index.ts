@@ -4,6 +4,7 @@ import type {
   AIChatResponse,
   AIChatSettings,
   ChatMessage,
+  AIProvider,
   RenameFileItem,
   RenameResult
 } from '@shared/ipc-types';
@@ -54,6 +55,20 @@ const api = {
    */
   applyRename: (files: RenameFileItem[]): Promise<RenameResult> => {
     return ipcRenderer.invoke('app:rename-files', files);
+  },
+
+  /**
+   * 获取指定 provider 的 API Key（从主进程安全存储）
+   */
+  getApiKey: (provider: AIProvider): Promise<string> => {
+    return ipcRenderer.invoke('settings:get-api-key', provider);
+  },
+
+  /**
+   * 保存指定 provider 的 API Key（写入主进程安全存储）
+   */
+  setApiKey: (provider: AIProvider, apiKey: string): Promise<void> => {
+    return ipcRenderer.invoke('settings:set-api-key', { provider, apiKey });
   }
 };
 
