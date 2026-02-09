@@ -147,7 +147,7 @@ function App(): React.JSX.Element {
 
   // 撤销处理
   const handleUndo = useCallback(async () => {
-    if (isUndoing || !canUndo) return;
+    if (isUndoing) return;
 
     const result = await undo();
     if (result.success) {
@@ -155,7 +155,7 @@ function App(): React.JSX.Element {
     } else {
       showToast(`撤销失败：${result.error}`, 'error');
     }
-  }, [isUndoing, canUndo, undo, showToast]);
+  }, [isUndoing, undo, showToast]);
 
   // AI 生成处理
   const handleRename = useCallback(async () => {
