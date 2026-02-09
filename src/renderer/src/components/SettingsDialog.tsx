@@ -56,9 +56,9 @@ export function SettingsDialog({
 
   if (!open) return null;
 
-  const labelClass = 'text-sm font-medium text-zinc-700 dark:text-zinc-300';
-  const helpClass = 'text-xs text-zinc-500 dark:text-zinc-400';
-  const fieldGap = 'space-y-2';
+  const labelClass = 'text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5';
+  const helpClass = 'text-xs text-zinc-500 dark:text-zinc-400 mt-1.5';
+  const fieldGap = 'space-y-8';
 
   const selectClass = cn(
     'h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none',
@@ -96,7 +96,8 @@ export function SettingsDialog({
           </Button>
         </div>
 
-        <div className="px-5 py-5 space-y-6">
+        <div className="px-6 py-7 grid gap-4">
+          {/* 供应商选择 */}
           <div className={fieldGap}>
             <label className={labelClass}>供应商</label>
             <select
@@ -130,6 +131,7 @@ export function SettingsDialog({
             <div className={helpClass}>切换供应商会自动填充 Base URL 和模型名称（Custom 除外）</div>
           </div>
 
+          {/* API Key */}
           <div className={fieldGap}>
             <label className={labelClass}>API Key</label>
             <div className="relative">
@@ -152,26 +154,29 @@ export function SettingsDialog({
             </div>
           </div>
 
-          <div className={fieldGap}>
-            <label className={labelClass}>Base URL</label>
-            <Input
-              type="text"
-              value={settings.baseUrl}
-              placeholder="例如 https://api.openai.com/v1"
-              onChange={(e) => updateSettings({ baseUrl: e.target.value })}
-              autoComplete="off"
-            />
-          </div>
+          {/* Base URL & 模型名称 - 两列布局 */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className={fieldGap}>
+              <label className={labelClass}>Base URL</label>
+              <Input
+                type="text"
+                value={settings.baseUrl}
+                placeholder="https://api.openai.com/v1"
+                onChange={(e) => updateSettings({ baseUrl: e.target.value })}
+                autoComplete="off"
+              />
+            </div>
 
-          <div className={fieldGap}>
-            <label className={labelClass}>模型名称</label>
-            <Input
-              type="text"
-              value={settings.model}
-              placeholder="例如 gpt-4o"
-              onChange={(e) => updateSettings({ model: e.target.value })}
-              autoComplete="off"
-            />
+            <div className={fieldGap}>
+              <label className={labelClass}>模型名称</label>
+              <Input
+                type="text"
+                value={settings.model}
+                placeholder="gpt-4o"
+                onChange={(e) => updateSettings({ model: e.target.value })}
+                autoComplete="off"
+              />
+            </div>
           </div>
         </div>
 
@@ -195,6 +200,7 @@ export function SettingsDialog({
           <Button
             variant="secondary"
             disabled={isSaving || isTesting}
+            title="测试连接会消耗少量 Token"
             onClick={async () => {
               setSaveError(null);
               setTestStatus(null);
