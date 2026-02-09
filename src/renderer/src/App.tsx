@@ -207,6 +207,7 @@ function App(): React.JSX.Element {
 
   const [isDragging, setIsDragging] = useState(false);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const dragDepthRef = useRef(0);
 
   // 是否处于审查模式（有待应用的更改）
   const isReviewMode = hasChanges && !isRenaming;
@@ -374,19 +375,65 @@ function App(): React.JSX.Element {
     e.stopPropagation();
   }, []);
 
-  const handleDragEnter = useCallback((e: DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragging(true);
+  const isFileDragEvent = useCallback((e: DragEvent) => {
+    const types = Array.from(e.dataTransfer?.types || []);
+    return types.includes('Files');
   }, []);
 
-  const handleDragLeave = useCallback((e: DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (e.currentTarget === e.target) {
-      setIsDragging(false);
-    }
+  const resetDragging = useCallback(() => {
+    dragDepthRef.current = 0;
+    setIsDragging(false);
   }, []);
+
+  useEffect(() => {
+    const onWindowDrop = (): void => resetDragging();
+    const onWindowDragEnd = (): void => resetDragging();
+    const onWindowDragLeave = (e: DragEvent): void => {
+      // When leaving the app window entirely, reset.
+      if (e.relatedTarget === null) resetDragging();
+    };
+
+    window.addEventListener('drop', onWindowDrop);
+    window.addEventListener('dragend', onWindowDragEnd);
+    window.addEventListener('dragleave', onWindowDragLeave as unknown as EventListener);
+    return () => {
+      window.removeEventListener('drop', onWindowDrop);
+      window.removeEventListener('dragend', onWindowDragEnd);
+      window.removeEventListener('dragleave', onWindowDragLeave as unknown as EventListener);
+    };
+  }, [resetDragging]);
+
+  const handleDragEnter = useCallback(
+    (e: DragEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!isFileDragEvent(e)) return;
+      dragDepthRef.current += 1;
+      setIsDragging(true);
+    },
+    [isFileDragEvent]
+  );
+
+  const handleDragLeave = useCallback(
+    (e: DragEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!isFileDragEvent(e)) return;
+      dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+      if (dragDepthRef.current === 0) {
+        setIsDragging(false);
+      }
+    },
+    [isFileDragEvent]
+  );
+
+  const handleDropRoot = useCallback(
+    (e: DragEvent<HTMLDivElement>) => {
+      resetDragging();
+      handleDrop(e);
+    },
+    [handleDrop, resetDragging]
+  );
 
   const isEmpty = files.length === 0;
 
@@ -396,10 +443,7 @@ function App(): React.JSX.Element {
         'flex h-screen w-screen flex-col bg-white dark:bg-zinc-950 transition-colors',
         isDragging && 'bg-blue-50/50 dark:bg-blue-950/20'
       )}
-      onDrop={(e) => {
-        setIsDragging(false);
-        handleDrop(e);
-      }}
+      onDrop={handleDropRoot}
       onDragOver={handleDragOver}
       onDragEnter={handleDragEnter}
       onDragLeave={handleDragLeave}
@@ -423,10 +467,14 @@ function App(): React.JSX.Element {
 
       {/* 拖放覆盖层 */}
       {isDragging && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-blue-500/10 backdrop-blur-sm border-2 border-dashed border-blue-400 rounded-lg m-2">
-          <div className="flex flex-col items-center gap-3 text-blue-500">
-            <UploadIcon className="h-16 w-16" />
-            <p className="text-xl font-medium">释放以添加文件</p>
+        <div className="fixed inset-0 z-50 pointer-events-none">
+          <div className="absolute inset-0 bg-blue-50/70 dark:bg-blue-950/30 backdrop-blur-[2px]" />
+          <div className="absolute inset-3 rounded-xl border-2 border-dashed border-blue-400/70 dark:border-blue-500/50" />
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="flex flex-col items-center gap-3 text-blue-600 dark:text-blue-300">
+              <UploadIcon className="h-16 w-16" />
+              <p className="text-xl font-medium">释放以添加文件</p>
+            </div>
           </div>
         </div>
       )}
