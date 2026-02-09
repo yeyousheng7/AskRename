@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { diffChars } from 'diff';
 import TextareaAutosize from 'react-textarea-autosize';
 import { Trash2, Undo2 } from 'lucide-react';
@@ -94,7 +94,7 @@ export type EditorRowProps = {
   isHighlighted?: boolean;
 };
 
-export default function EditorRow({
+function EditorRowImpl({
   file,
   index,
   filesLength,
@@ -258,3 +258,26 @@ export default function EditorRow({
     </div>
   );
 }
+
+function areEditorRowPropsEqual(prev: EditorRowProps, next: EditorRowProps): boolean {
+  return (
+    prev.file.id === next.file.id &&
+    prev.file.original === next.file.original &&
+    prev.file.renamed === next.file.renamed &&
+    prev.file.path === next.file.path &&
+    prev.index === next.index &&
+    prev.filesLength === next.filesLength &&
+    prev.editingIndex === next.editingIndex &&
+    prev.setEditingIndex === next.setEditingIndex &&
+    prev.onRename === next.onRename &&
+    prev.onRevert === next.onRevert &&
+    prev.onRemove === next.onRemove &&
+    prev.isLoading === next.isLoading &&
+    prev.isHighlighted === next.isHighlighted
+  );
+}
+
+const EditorRow = memo(EditorRowImpl, areEditorRowPropsEqual);
+EditorRow.displayName = 'EditorRow';
+
+export default EditorRow;
