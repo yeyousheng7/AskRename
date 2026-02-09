@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import type { AISettings } from '@/hooks/useSettings';
 import { cn } from '@/lib/utils';
+import { electronApi } from '@/lib/electron-api';
 import type { ChatMessage } from '@shared/ipc-types';
 
 const PROVIDER_LABELS: Record<AISettings['provider'], string> = {
@@ -115,7 +116,7 @@ export function SettingsDialog({
                 }
 
                 try {
-                  const saved = await window.api.getApiKey(provider);
+                  const saved = await electronApi.getApiKey(provider);
                   updateSettings({ apiKey: saved || '' });
                 } catch (err) {
                   console.error('Failed to load api key:', err);
@@ -220,7 +221,7 @@ export function SettingsDialog({
               try {
                 let apiKeyToUse = settings.apiKey.trim();
                 if (settings.provider !== 'ollama' && !apiKeyToUse) {
-                  apiKeyToUse = ((await window.api.getApiKey(settings.provider)) || '').trim();
+                  apiKeyToUse = ((await electronApi.getApiKey(settings.provider)) || '').trim();
                 }
                 if (settings.provider !== 'ollama' && !apiKeyToUse) {
                   setTestStatus({ type: 'error', message: '请先配置 API Key' });
@@ -235,7 +236,7 @@ export function SettingsDialog({
                   { role: 'user', content: 'ok' }
                 ];
 
-                const resp = await window.api.askAI(
+                const resp = await electronApi.askAI(
                   {
                     provider: settings.provider,
                     apiKey: apiKeyToUse,
@@ -270,7 +271,7 @@ export function SettingsDialog({
               setIsSaving(true);
               try {
                 if (settings.provider !== 'ollama') {
-                  await window.api.setApiKey(settings.provider, settings.apiKey);
+                  await electronApi.setApiKey(settings.provider, settings.apiKey);
                 }
                 updateSettings({ apiKey: '' });
                 handleClose();

@@ -2,82 +2,15 @@ import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react'
 import type { FileItem } from '@/types/file';
 import { generateNewNames, type AIServiceConfig } from '@/lib/ai-service';
 import { ensureExtension } from '@/lib/filename';
+import { electronApi } from '@/lib/electron-api';
+import {
+  extractFilePathsFromDataTransfer,
+  getElectronFilePath,
+  isAbsolutePathLike,
+  toFileItemsFromDataTransferFiles
+} from '@/lib/file-drop';
+import { getDedupeKey } from '@/lib/file-dedupe';
 import type { RenameError, RenameFileItem, RenameResult, RenamedItem } from '@shared/ipc-types';
-
-function isAbsolutePathLike(p: string): boolean {
-  if (!p) return false;
-  // Windows: C:\ or C:/, or UNC \\server\share
-  if (/^[a-zA-Z]:[\\/]/.test(p) || /^\\\\/.test(p)) return true;
-  // POSIX: /home/...
-  return p.startsWith('/');
-}
-
-function normalizePathKey(p: string): string {
-  const normalizedSlashes = p.replaceAll('/', '\\');
-  // On Windows file paths are generally case-insensitive.
-  if (/^[a-zA-Z]:[\\/]/.test(normalizedSlashes) || /^\\\\/.test(normalizedSlashes)) {
-    return normalizedSlashes.toLowerCase();
-  }
-  return normalizedSlashes;
-}
-
-function getDedupeKey(file: FileItem): string {
-  const p = (file.path || '').trim();
-  if (isAbsolutePathLike(p)) return `path:${normalizePathKey(p)}`;
-  return `name:${file.original}`;
-}
-
-function extractFilePathsFromDataTransfer(dt: DataTransfer): string[] {
-  const uriList = dt.getData('text/uri-list') || dt.getData('text/plain') || '';
-  const lines = uriList
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter((l) => l && !l.startsWith('#'));
-
-  const paths: string[] = [];
-
-  for (const line of lines) {
-    if (!line.toLowerCase().startsWith('file:')) continue;
-    try {
-      const url = new URL(line);
-      const host = url.host;
-      const pathname = decodeURIComponent(url.pathname);
-
-      // Windows: file:///C:/Users/... -> C:\Users\...
-      if (/^\/[a-zA-Z]:\//.test(pathname)) {
-        paths.push(pathname.slice(1).replaceAll('/', '\\'));
-        continue;
-      }
-
-      // Windows UNC: file://server/share/path -> \\server\share\path
-      if (host) {
-        const unc = `\\\\${host}${pathname}`.replaceAll('/', '\\');
-        paths.push(unc);
-        continue;
-      }
-
-      // POSIX: file:///home/... -> /home/...
-      paths.push(pathname);
-    } catch {
-      // ignore parse failures
-    }
-  }
-
-  return paths.filter(isAbsolutePathLike);
-}
-
-function getElectronFilePath(file: File): string {
-  try {
-    if (window.api && typeof window.api.getPathForFile === 'function') {
-      return (window.api.getPathForFile(file) || '').trim();
-    }
-  } catch {
-    // ignore
-  }
-
-  const legacy = file as unknown as { path?: string };
-  return (legacy.path || '').trim();
-}
 
 // 历史记录项：用于撤销操作
 export type HistoryItem = {
@@ -245,18 +178,7 @@ export function useFileStore(): UseFileStoreResult {
       const needsFallback = rawPaths.some((p) => !isAbsolutePathLike(p));
       const fallbackPaths = needsFallback ? extractFilePathsFromDataTransfer(e.dataTransfer) : [];
 
-      const newFiles: FileItem[] = droppedFiles.map((file, index) => {
-        const rawPath = rawPaths[index] || '';
-        const pathFromUri = fallbackPaths[index] || '';
-        const finalPath = isAbsolutePathLike(rawPath) ? rawPath : pathFromUri;
-
-        return {
-          id: `${file.name}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-          original: file.name,
-          renamed: file.name,
-          path: finalPath || file.name
-        };
-      });
+      const newFiles: FileItem[] = toFileItemsFromDataTransferFiles(droppedFiles, fallbackPaths);
 
       addFiles(newFiles);
     },
@@ -356,7 +278,7 @@ export function useFileStore(): UseFileStoreResult {
       }
 
       // 调用主进程执行重命名
-      const result: RenameResult = await window.api.applyRename(renameList);
+      const result: RenameResult = await electronApi.applyRename(renameList);
 
       // 如果有成功的重命名，保存到历史记录（用于撤销）
       if (result.renamed && result.renamed.length > 0) {
@@ -425,7 +347,7 @@ export function useFileStore(): UseFileStoreResult {
       const lastOperation = history[history.length - 1];
 
       // 执行反向重命名
-      const result = await window.api.applyRename(
+      const result = await electronApi.applyRename(
         lastOperation.undoItems.map((item) => ({
           oldPath: item.oldPath,
           newPath: item.newPath

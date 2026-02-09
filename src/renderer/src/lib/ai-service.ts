@@ -8,6 +8,7 @@
 // ============================================================================
 
 import type { AIChatResponse, AIChatSettings, ChatMessage } from '@shared/ipc-types';
+import { electronApi } from '@/lib/electron-api';
 
 export type AIProvider = 'openai' | 'deepseek' | 'ollama' | 'custom';
 
@@ -163,7 +164,7 @@ export async function generateNewNames(
   ];
 
   // 通过 IPC 调用主进程
-  const response: AIChatResponse = await window.api.askAI(
+  const response: AIChatResponse = await electronApi.askAI(
     { provider, apiKey, baseURL, model, jsonMode, maxTokens } satisfies AIChatSettings,
     messages
   );
