@@ -13,6 +13,7 @@ import { AppFooter } from '@/components/AppFooter';
 import { useToast } from '@/hooks/useToast';
 import { useFileDragOverlay } from '@/hooks/useFileDragOverlay';
 import { electronApi } from '@/lib/electron-api';
+import { generateAutoDecision } from '@/lib/ai-service';
 import { cn } from '@/lib/utils';
 
 // ============================================================================
@@ -20,8 +21,8 @@ import { cn } from '@/lib/utils';
 // ============================================================================
 
 function App(): React.JSX.Element {
-  // 模式状态
-  const [mode, setMode] = useState<'ai' | 'regex'>('ai');
+  // 模式状态：auto(智能) | ai(纯AI) | regex(纯正则)
+  const [mode, setMode] = useState<'auto' | 'ai' | 'regex'>('auto');
 
   // AI 模式状态
   const [instruction, setInstruction] = useState('');
@@ -85,18 +86,21 @@ function App(): React.JSX.Element {
   }, [mode, findPattern, replacePattern, files.length, batchUpdateFileNames]);
 
   // 模式切换处理
-  const handleModeChange = useCallback((newMode: 'ai' | 'regex') => {
-    if (newMode === mode) return;
+  const handleModeChange = useCallback(
+    (newMode: 'auto' | 'ai' | 'regex') => {
+      if (newMode === mode) return;
 
-    // 切换时清空输入并重置预览
-    setInstruction('');
-    setFindPattern('');
-    setReplacePattern('');
-    discardChanges();
-    setError(null);
+      // 切换时清空输入并重置预览
+      setInstruction('');
+      setFindPattern('');
+      setReplacePattern('');
+      discardChanges();
+      setError(null);
 
-    setMode(newMode);
-  }, [mode, discardChanges]);
+      setMode(newMode);
+    },
+    [mode, discardChanges]
+  );
 
   const openSettings = useCallback(async () => {
     setIsSettingsOpen(true);
@@ -165,6 +169,78 @@ function App(): React.JSX.Element {
     showToast,
     startRenaming,
     updateSettings
+  ]);
+
+  // Auto 模式：AI 决策引擎
+  const handleAutoRename = useCallback(async () => {
+    if (isRenaming || files.length === 0 || !instruction.trim()) return;
+
+    // 获取 API Key
+    let apiKeyToUse = settings.apiKey.trim();
+    if (settings.provider !== 'ollama' && !apiKeyToUse) {
+      try {
+        apiKeyToUse = ((await electronApi.getApiKey(settings.provider)) || '').trim();
+      } catch (err) {
+        console.error('Failed to load api key:', err);
+      }
+
+      if (!apiKeyToUse) {
+        void openSettings();
+        showToast('请先配置 API Key', 'error');
+        return;
+      }
+
+      updateSettings({ apiKey: apiKeyToUse });
+    }
+
+    setError(null);
+    try {
+      // 调用 AI 获取决策
+      const fileNames = files.map((f) => f.original);
+      const decision = await generateAutoDecision(fileNames, instruction, {
+        provider: settings.provider,
+        apiKey: apiKeyToUse,
+        baseURL: settings.baseUrl,
+        model: settings.model
+      });
+
+      if (decision.type === 'regex') {
+        // AI 决定使用正则：切换到正则模式并填入规则
+        setMode('regex');
+        setFindPattern(decision.find);
+        setReplacePattern(decision.replace);
+        showToast('AI 已生成正则规则，可以调整后应用', 'success');
+      } else {
+        // AI 返回文件名列表：由于只发送了样本，需要对剩余文件再次调用 AI
+        // 简化处理：如果文件数超过样本数，回退到完整 AI 模式
+        if (files.length > 20) {
+          // 文件超过样本数，需要完整 AI 处理
+          await startRenaming(instruction, {
+            provider: settings.provider,
+            apiKey: apiKeyToUse,
+            baseURL: settings.baseUrl,
+            model: settings.model
+          });
+        } else {
+          // 文件数在样本范围内，直接使用返回结果
+          batchUpdateFileNames(decision.names);
+        }
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'AI 决策失败，请重试';
+      setError(message);
+      console.error('Auto rename failed:', err);
+    }
+  }, [
+    instruction,
+    isRenaming,
+    files,
+    openSettings,
+    settings,
+    showToast,
+    updateSettings,
+    startRenaming,
+    batchUpdateFileNames
   ]);
 
   // 放弃更改
@@ -305,7 +381,7 @@ function App(): React.JSX.Element {
         onDiscard={handleDiscard}
         onApply={() => void handleApply()}
         onStop={stopRenaming}
-        onGenerate={() => void handleRename()}
+        onGenerate={() => void (mode === 'auto' ? handleAutoRename() : handleRename())}
       />
     </div>
   );

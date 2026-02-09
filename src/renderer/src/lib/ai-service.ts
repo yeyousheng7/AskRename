@@ -223,3 +223,149 @@ function parseAndValidateResponse(content: string, expectedLength: number): stri
     return name;
   });
 }
+
+// ============================================================================
+// Auto Mode 决策引擎
+// ============================================================================
+
+import type { AIDecision } from '@shared/ipc-types';
+
+/** 决策模式采样数量：只发送前 N 个文件名给 AI 以节省 Token */
+const DECISION_SAMPLE_SIZE = 20;
+
+/** 决策型 System Prompt */
+const AUTO_DECISION_PROMPT = `你是文件重命名助手。请分析用户的指令，判断能否用正则表达式（JavaScript 语法）解决。
+
+判断规则：
+- 正则适用场景：删除数字、替换特定字符、添加前后缀、大小写转换、简单模式提取等
+- AI 适用场景：翻译、理解文件内容、复杂语义理解、需要上下文推理的任务
+
+响应格式（只返回 JSON，不要任何解释）：
+
+正则任务示例：
+{"type":"regex","find":"\\d+","replace":""}
+
+AI 任务示例：
+{"type":"list","names":["新名称1.txt","新名称2.txt"]}
+
+规则：
+- 如果返回 list 类型，names 数组长度必须与输入文件数量完全一致
+- 正则表达式使用 JavaScript 语法，会自动添加 g 标志
+- 只输出 JSON，不要任何解释或 markdown 标记`;
+
+/**
+ * 调用 AI 获取重命名决策
+ * @param files - 原始文件名数组（只发送前 20 个作为样本）
+ * @param userInstruction - 用户的重命名指令
+ * @param config - API 配置
+ * @returns AI 决策结果（regex 或 list）
+ */
+export async function generateAutoDecision(
+  files: string[],
+  userInstruction: string,
+  config?: Partial<AIServiceConfig>
+): Promise<AIDecision> {
+  const finalConfig: AIServiceConfig = { ...getConfigFromEnv(), ...config };
+  const { provider, apiKey, baseURL, model, jsonMode, maxTokens } = finalConfig;
+
+  if (provider !== 'ollama' && !apiKey) {
+    throw new Error('API Key 未配置，请在设置中填写 API Key');
+  }
+
+  if (!baseURL) {
+    throw new Error('API Base URL 未配置');
+  }
+
+  if (!model) {
+    throw new Error('模型名称未配置');
+  }
+
+  if (files.length === 0) {
+    throw new Error('没有文件需要重命名');
+  }
+
+  // 只发送前 N 个文件名作为样本，节省 Token
+  const sampleFiles = files.slice(0, DECISION_SAMPLE_SIZE);
+  const totalCount = files.length;
+
+  const userMessage = `文件列表（共 ${totalCount} 个，显示前 ${sampleFiles.length} 个）：
+${JSON.stringify(sampleFiles)}
+
+修改指令：${userInstruction}`;
+
+  const messages: ChatMessage[] = [
+    { role: 'system', content: AUTO_DECISION_PROMPT },
+    { role: 'user', content: userMessage }
+  ];
+
+  // 通过 IPC 调用主进程
+  const response = await electronApi.askAI(
+    { provider, apiKey, baseURL, model, jsonMode, maxTokens },
+    messages
+  );
+
+  if (!response.success) {
+    throw new Error(response.error || 'AI 服务发生未知错误');
+  }
+
+  if (!response.content) {
+    throw new Error('AI 返回内容为空，请尝试修改指令后重试');
+  }
+
+  return parseAutoDecisionResponse(response.content, sampleFiles.length);
+}
+
+/**
+ * 解析 AI 决策响应
+ */
+function parseAutoDecisionResponse(content: string, sampleLength: number): AIDecision {
+  let decision: unknown;
+
+  try {
+    const cleanedContent = content
+      .replace(/^```(?:json)?\s*/i, '')
+      .replace(/\s*```$/i, '')
+      .trim();
+
+    decision = JSON.parse(cleanedContent);
+  } catch {
+    throw new Error(`AI 决策格式错误，无法解析 JSON。原始输出: ${content.slice(0, 100)}...`);
+  }
+
+  // 验证返回格式
+  if (typeof decision !== 'object' || decision === null) {
+    throw new Error('AI 决策格式错误：返回值必须是对象');
+  }
+
+  const obj = decision as Record<string, unknown>;
+
+  if (obj.type === 'regex') {
+    if (typeof obj.find !== 'string') {
+      throw new Error('AI 决策格式错误：regex 类型缺少 find 字段');
+    }
+    if (typeof obj.replace !== 'string') {
+      throw new Error('AI 决策格式错误：regex 类型缺少 replace 字段');
+    }
+    return { type: 'regex', find: obj.find, replace: obj.replace };
+  }
+
+  if (obj.type === 'list') {
+    if (!Array.isArray(obj.names)) {
+      throw new Error('AI 决策格式错误：list 类型缺少 names 数组');
+    }
+    if (obj.names.length !== sampleLength) {
+      throw new Error(
+        `AI 决策格式错误：names 数组长度 (${obj.names.length}) 与样本数量 (${sampleLength}) 不匹配`
+      );
+    }
+    const names = obj.names.map((n, i) => {
+      if (typeof n !== 'string') {
+        throw new Error(`AI 决策格式错误：第 ${i + 1} 个文件名不是字符串`);
+      }
+      return n;
+    });
+    return { type: 'list', names };
+  }
+
+  throw new Error(`AI 决策格式错误：未知类型 "${obj.type}"，应为 "regex" 或 "list"`);
+}

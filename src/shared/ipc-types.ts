@@ -54,3 +54,8 @@ export interface RenameResult {
   errors: RenameError[];
   renamed?: RenamedItem[];
 }
+
+// AI 决策结果：正则类型或列表类型
+export type AIDecision =
+  | { type: 'regex'; find: string; replace: string }
+  | { type: 'list'; names: string[] };

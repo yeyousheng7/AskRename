@@ -7,14 +7,15 @@ import {
   Undo2Icon,
   WandIcon,
   XIcon,
-  Regex
+  Regex,
+  Zap
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { QuickActionsMenu } from '@/components/QuickActionsMenu';
 import { cn } from '@/lib/utils';
 
-export type Mode = 'ai' | 'regex';
+export type Mode = 'auto' | 'ai' | 'regex';
 
 export function AppFooter({
   mode,
@@ -80,8 +81,7 @@ export function AppFooter({
   // 模式切换按钮样式
   const modeButtonBase =
     'px-3 py-1.5 text-xs font-medium rounded-md transition-all flex items-center gap-1.5';
-  const modeButtonActive =
-    'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 shadow-sm';
+  const modeButtonActive = 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 shadow-sm';
   const modeButtonInactive =
     'text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800';
 
@@ -111,9 +111,19 @@ export function AppFooter({
         {/* 模式切换 */}
         <div className="flex rounded-lg border border-zinc-200 dark:border-zinc-700 p-0.5 bg-zinc-50 dark:bg-zinc-800">
           <button
+            onClick={() => onModeChange('auto')}
+            className={cn(modeButtonBase, mode === 'auto' ? modeButtonActive : modeButtonInactive)}
+            disabled={isRenaming || isApplying || isUndoing}
+            title="智能模式：AI 自动判断使用正则还是完整 AI"
+          >
+            <Zap className="h-3.5 w-3.5" />
+            智能
+          </button>
+          <button
             onClick={() => onModeChange('ai')}
             className={cn(modeButtonBase, mode === 'ai' ? modeButtonActive : modeButtonInactive)}
             disabled={isRenaming || isApplying || isUndoing}
+            title="AI 模式：始终使用 AI 生成文件名"
           >
             <SparklesIcon className="h-3.5 w-3.5" />
             AI
@@ -122,14 +132,15 @@ export function AppFooter({
             onClick={() => onModeChange('regex')}
             className={cn(modeButtonBase, mode === 'regex' ? modeButtonActive : modeButtonInactive)}
             disabled={isRenaming || isApplying || isUndoing}
+            title="正则模式：手动输入正则表达式"
           >
             <Regex className="h-3.5 w-3.5" />
             正则
           </button>
         </div>
 
-        {/* AI 模式：快捷指令按钮 */}
-        {mode === 'ai' && (
+        {/* auto/ai 模式：快捷指令按钮 */}
+        {(mode === 'auto' || mode === 'ai') && (
           <div className="relative">
             <Button
               onClick={() => setIsQuickActionsOpen(!isQuickActionsOpen)}
@@ -151,28 +162,7 @@ export function AppFooter({
         )}
 
         {/* 输入区域 - 根据模式动态渲染 */}
-        {mode === 'ai' ? (
-          // AI 模式：单输入框
-          <Input
-            ref={inputRef}
-            type="text"
-            placeholder={
-              isReviewMode
-                ? '不满意？修改指令后按回车重新生成...'
-                : '输入重命名指令，例如：将所有图片按日期命名...'
-            }
-            value={instruction}
-            onChange={(e) => onInstructionChange(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                onGenerate();
-              }
-            }}
-            className="flex-1 font-mono bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500"
-            disabled={isEmpty || isRenaming || isApplying || isUndoing}
-          />
-        ) : (
+        {mode === 'regex' ? (
           // 正则模式：查找/替换双输入框
           <div className="flex flex-1 gap-2">
             <Input
@@ -193,6 +183,27 @@ export function AppFooter({
               disabled={isEmpty || isApplying || isUndoing}
             />
           </div>
+        ) : (
+          // auto/ai 模式：单输入框
+          <Input
+            ref={inputRef}
+            type="text"
+            placeholder={
+              isReviewMode
+                ? '不满意？修改指令后按回车重新生成...'
+                : '输入重命名指令，例如：将所有图片按日期命名...'
+            }
+            value={instruction}
+            onChange={(e) => onInstructionChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                onGenerate();
+              }
+            }}
+            className="flex-1 font-mono bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500"
+            disabled={isEmpty || isRenaming || isApplying || isUndoing}
+          />
         )}
 
         {/* 审查模式：放弃和应用按钮 */}
