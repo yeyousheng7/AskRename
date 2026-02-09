@@ -14,6 +14,7 @@ import { useToast } from '@/hooks/useToast';
 import { useFileDragOverlay } from '@/hooks/useFileDragOverlay';
 import { electronApi } from '@/lib/electron-api';
 import { generateAutoDecision } from '@/lib/ai-service';
+import { batchApplyMagicRegex } from '@/lib/magic-regex';
 import { cn } from '@/lib/utils';
 
 // ============================================================================
@@ -67,20 +68,12 @@ function App(): React.JSX.Element {
   // 是否处于审查模式（有待应用的更改）
   const isReviewMode = hasChanges && !isRenaming;
 
-  // 正则实时预览引擎
+  // 正则实时预览引擎（支持魔法变量）
   useEffect(() => {
     if (mode !== 'regex' || files.length === 0) return;
 
-    const newNames = files.map((file) => {
-      if (!findPattern.trim()) return file.original;
-      try {
-        const regex = new RegExp(findPattern, 'g');
-        return file.original.replace(regex, replacePattern);
-      } catch {
-        // 正则语法错误时保持原名
-        return file.original;
-      }
-    });
+    const filenames = files.map((f) => f.original);
+    const newNames = batchApplyMagicRegex(filenames, findPattern, replacePattern);
 
     batchUpdateFileNames(newNames);
   }, [mode, findPattern, replacePattern, files.length, batchUpdateFileNames]);

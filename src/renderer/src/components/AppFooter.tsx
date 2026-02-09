@@ -164,24 +164,32 @@ export function AppFooter({
         {/* 输入区域 - 根据模式动态渲染 */}
         {mode === 'regex' ? (
           // 正则模式：查找/替换双输入框
-          <div className="flex flex-1 gap-2">
-            <Input
-              type="text"
-              placeholder="查找 (正则)..."
-              value={findPattern}
-              onChange={(e) => onFindPatternChange(e.target.value)}
-              className="flex-1 font-mono bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500"
-              disabled={isEmpty || isApplying || isUndoing}
-            />
-            <span className="flex items-center text-zinc-400 dark:text-zinc-500">→</span>
-            <Input
-              type="text"
-              placeholder="替换为..."
-              value={replacePattern}
-              onChange={(e) => onReplacePatternChange(e.target.value)}
-              className="flex-1 font-mono bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500"
-              disabled={isEmpty || isApplying || isUndoing}
-            />
+          <div className="flex flex-1 flex-col gap-1">
+            <div className="flex gap-2">
+              <Input
+                type="text"
+                placeholder="查找 (正则)..."
+                value={findPattern}
+                onChange={(e) => onFindPatternChange(e.target.value)}
+                className="flex-1 font-mono bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500"
+                disabled={isEmpty || isApplying || isUndoing}
+              />
+              <span className="flex items-center text-zinc-400 dark:text-zinc-500">→</span>
+              <Input
+                type="text"
+                placeholder="替换为..."
+                value={replacePattern}
+                onChange={(e) => onReplacePatternChange(e.target.value)}
+                className="flex-1 font-mono bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500"
+                disabled={isEmpty || isApplying || isUndoing}
+              />
+            </div>
+            <p className="text-xs text-zinc-400 dark:text-zinc-500 pl-1">
+              💡 支持魔法变量：
+              <code className="bg-zinc-100 dark:bg-zinc-800 px-1 rounded">${'{i}'}</code> 序号，
+              <code className="bg-zinc-100 dark:bg-zinc-800 px-1 rounded">${'{i0}'}</code> 双位序号
+              (01, 02...)
+            </p>
           </div>
         ) : (
           // auto/ai 模式：单输入框
