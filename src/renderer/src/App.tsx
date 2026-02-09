@@ -442,6 +442,7 @@ function App(): React.JSX.Element {
         onApply={() => void handleApply()}
         onStop={stopRenaming}
         onGenerate={() => void (mode === 'auto' ? handleAutoRename() : handleRename())}
+        showToast={showToast}
         history={history}
         onSelectHistory={handleSelectHistory}
       />

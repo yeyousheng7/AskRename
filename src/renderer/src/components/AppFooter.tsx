@@ -15,6 +15,8 @@ import { Button } from '@/components/ui/button';
 import { HistoryDrawer } from '@/components/HistoryDrawer';
 import { CommandMenu } from '@/components/CommandMenu';
 import { usePresets, type Preset } from '@/hooks/usePresets';
+import { Input } from '@/components/ui/input';
+import type { ToastType } from '@/hooks/useToast';
 import { cn } from '@/lib/utils';
 
 export type Mode = 'auto' | 'ai' | 'regex';
@@ -83,6 +85,7 @@ export function AppFooter({
   onApply,
   onStop,
   onGenerate,
+  showToast,
   history,
   onSelectHistory
 }: {
@@ -114,6 +117,7 @@ export function AppFooter({
   onApply: () => void;
   onStop: () => void;
   onGenerate: () => void;
+  showToast: (message: string, type: ToastType) => void;
   // Session History
   history: string[];
   onSelectHistory: (text: string) => void;
@@ -122,7 +126,57 @@ export function AppFooter({
   const [isCommandMenuOpen, setIsCommandMenuOpen] = useState(false);
   const [commandSelectedIndex, setCommandSelectedIndex] = useState(0);
   const modeMenuRef = useRef<HTMLDivElement>(null);
-  const { presets } = usePresets();
+  const { presets, addPreset } = usePresets();
+
+  const [isSaveDialogOpen, setIsSaveDialogOpen] = useState(false);
+  const [savePresetName, setSavePresetName] = useState('');
+  const [savePresetContent, setSavePresetContent] = useState('');
+  const saveDetectedRef = useRef(false);
+
+  const getSaveCommandContent = useCallback((text: string): string | null => {
+    const rightTrimmed = text.replace(/\s+$/, '');
+    const lower = rightTrimmed.toLowerCase();
+    if (!lower.endsWith('/save')) return null;
+
+    const idx = lower.lastIndexOf('/save');
+    if (idx < 0) return null;
+    if (idx > 0 && !/\s/.test(lower[idx - 1] ?? '')) return null;
+
+    return rightTrimmed.slice(0, idx).trimEnd();
+  }, []);
+
+  const beginSavePreset = useCallback(
+    (content: string) => {
+      if (!content.trim()) {
+        showToast('没有可保存的内容', 'error');
+        return;
+      }
+      setIsSaveDialogOpen(true);
+      setSavePresetName('');
+      setSavePresetContent(content);
+      setIsCommandMenuOpen(false);
+      setCommandSelectedIndex(0);
+    },
+    [showToast]
+  );
+
+  const handleSaveDialogCancel = useCallback(() => {
+    setIsSaveDialogOpen(false);
+    setSavePresetName('');
+    setSavePresetContent('');
+    setTimeout(() => inputRef.current?.focus(), 50);
+  }, [inputRef]);
+
+  const handleSaveDialogConfirm = useCallback(() => {
+    const name = savePresetName.trim();
+    if (!name) return;
+    addPreset({ name, content: savePresetContent, type: 'prompt' });
+    setIsSaveDialogOpen(false);
+    setSavePresetName('');
+    setSavePresetContent('');
+    showToast('预设已保存', 'success');
+    setTimeout(() => inputRef.current?.focus(), 50);
+  }, [addPreset, inputRef, savePresetContent, savePresetName, showToast]);
 
   // Slash command 过滤
   const filteredPresets = useMemo(() => {
@@ -178,6 +232,70 @@ export function AppFooter({
 
   return (
     <>
+      {isSaveDialogOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center">
+          <button
+            aria-label="Close"
+            className="absolute inset-0 bg-black/50"
+            onClick={handleSaveDialogCancel}
+          />
+          <div className="relative z-10 w-[min(420px,calc(100vw-2rem))] rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-xl">
+            <div className="flex items-center justify-between border-b border-zinc-200 dark:border-zinc-700 px-4 py-3">
+              <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+                保存为预设
+              </span>
+              <Button
+                size="icon"
+                variant="ghost"
+                onClick={handleSaveDialogCancel}
+                className="h-7 w-7"
+                title="关闭"
+              >
+                <XIcon className="h-4 w-4" />
+              </Button>
+            </div>
+
+            <div className="px-4 py-4 space-y-2">
+              <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                预设名称
+              </label>
+              <Input
+                value={savePresetName}
+                onChange={(e) => setSavePresetName(e.target.value)}
+                placeholder="例如：批量转小写"
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleSaveDialogConfirm();
+                  }
+                  if (e.key === 'Escape') {
+                    e.preventDefault();
+                    handleSaveDialogCancel();
+                  }
+                }}
+              />
+              <div className="text-xs text-zinc-500 dark:text-zinc-400">
+                将保存当前输入内容为一个新的预设（AI 提示词）。
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 border-t border-zinc-200 dark:border-zinc-700 px-4 py-3 bg-zinc-50 dark:bg-zinc-800/50">
+              <Button variant="secondary" onClick={handleSaveDialogCancel}>
+                取消
+              </Button>
+              <Button
+                onClick={handleSaveDialogConfirm}
+                disabled={!savePresetName.trim()}
+                className="bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+              >
+                保存
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 独立撤销按钮 - 悬浮在左侧 */}
       <Button
         onClick={onUndo}
@@ -508,6 +626,14 @@ export function AppFooter({
                   value={instruction}
                   onChange={(e) => {
                     const val = e.target.value;
+                    const saveContent = getSaveCommandContent(val);
+                    if (saveContent !== null && !isSaveDialogOpen && !saveDetectedRef.current) {
+                      saveDetectedRef.current = true;
+                      onInstructionChange(saveContent);
+                      beginSavePreset(saveContent);
+                      return;
+                    }
+                    saveDetectedRef.current = saveContent !== null;
                     onInstructionChange(val);
                     // 检测 "/" 触发
                     if (val.startsWith('/')) {
@@ -551,9 +677,13 @@ export function AppFooter({
                     // Enter: 发送指令（如果有文本）
                     if (e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
                       e.preventDefault();
-                      if (instruction.trim()) {
-                        onGenerate();
+                      const saveContent = getSaveCommandContent(instruction);
+                      if (saveContent !== null) {
+                        onInstructionChange(saveContent);
+                        beginSavePreset(saveContent);
+                        return;
                       }
+                      if (instruction.trim()) onGenerate();
                     }
                     // Cmd/Ctrl + Enter: review 状态下确认应用
                     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
@@ -631,7 +761,19 @@ export function AppFooter({
             ) : (
               // 其他状态：显示发送按钮
               <button
-                onClick={mode === 'regex' && isReviewMode ? onApply : onGenerate}
+                onClick={() => {
+                  if (mode === 'regex' && isReviewMode) {
+                    onApply();
+                    return;
+                  }
+                  const saveContent = getSaveCommandContent(instruction);
+                  if (saveContent !== null) {
+                    onInstructionChange(saveContent);
+                    beginSavePreset(saveContent);
+                    return;
+                  }
+                  onGenerate();
+                }}
                 disabled={isEmpty || !canSubmit || isDisabled}
                 className={cn(
                   'h-9 w-9 rounded-full flex items-center justify-center',

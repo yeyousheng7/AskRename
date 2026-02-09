@@ -59,9 +59,12 @@ function PresetEditor({
   const [name, setName] = useState(preset?.name ?? '');
   const [content, setContent] = useState(preset?.content ?? '');
   const [type, setType] = useState<'regex' | 'prompt'>(preset?.type ?? 'prompt');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleSubmit = (): void => {
     if (!name.trim() || !content.trim()) return;
+    if (isSubmitting) return;
+    setIsSubmitting(true);
     onSave({ name: name.trim(), content: content.trim(), type });
   };
 
@@ -132,7 +135,7 @@ function PresetEditor({
           </Button>
           <Button
             onClick={handleSubmit}
-            disabled={!name.trim() || !content.trim()}
+            disabled={isSubmitting || !name.trim() || !content.trim()}
             className="bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
           >
             保存
