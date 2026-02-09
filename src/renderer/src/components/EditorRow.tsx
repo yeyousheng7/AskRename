@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { diffChars } from 'diff';
 import TextareaAutosize from 'react-textarea-autosize';
 import { Trash2, Undo2 } from 'lucide-react';
@@ -107,6 +107,7 @@ export default function EditorRow({
   isHighlighted = false
 }: EditorRowProps): React.JSX.Element {
   const [isHovered, setIsHovered] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // 检查该行是否有修改
   const hasChange = file.original !== file.renamed;
@@ -161,6 +162,21 @@ export default function EditorRow({
     }
   }, [onRevert, index]);
 
+  // 处理编辑状态变化时的聚焦
+  const isEditing = editingIndex === index;
+  useEffect(() => {
+    if (isEditing && textareaRef.current) {
+      const textarea = textareaRef.current;
+      textarea.focus();
+
+      // 统一将光标放到文本末尾
+      // 因为点击 DiffAddedText 切换到 TextareaAutosize 时，无法获取精确点击位置
+      // 放到末尾比默认的开头更自然
+      const len = textarea.value.length;
+      textarea.setSelectionRange(len, len);
+    }
+  }, [isEditing]);
+
   return (
     <div
       className={cn(
@@ -205,11 +221,11 @@ export default function EditorRow({
           </div>
         ) : editingIndex === index ? (
           <TextareaAutosize
+            ref={textareaRef}
             value={file.renamed}
             onChange={(e) => onRename(file.id, e.target.value)}
             onKeyDown={handleKeyDown}
             onBlur={stopEditing}
-            autoFocus
             className={cn(
               'w-full bg-transparent resize-none focus:outline-none text-zinc-800 dark:text-zinc-200',
               textStyles
