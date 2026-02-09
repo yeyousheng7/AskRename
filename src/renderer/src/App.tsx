@@ -78,15 +78,24 @@ function App(): React.JSX.Element {
   // 是否处于审查模式（有待应用的更改）
   const isReviewMode = hasChanges && !isRenaming;
 
+  const filesRef = useRef(files);
+  useEffect(() => {
+    filesRef.current = files;
+  }, [files]);
+  const originalNamesKey = files.map((f) => f.original).join('\u0000');
+
   // 正则实时预览引擎（支持魔法变量）
   useEffect(() => {
-    if (mode !== 'regex' || files.length === 0) return;
+    if (mode !== 'regex') return;
 
-    const filenames = files.map((f) => f.original);
+    const currentFiles = filesRef.current;
+    if (currentFiles.length === 0) return;
+
+    const filenames = currentFiles.map((f) => f.original);
     const newNames = batchApplyMagicRegex(filenames, findPattern, replacePattern);
 
     batchUpdateFileNames(newNames);
-  }, [mode, findPattern, replacePattern, files.length, batchUpdateFileNames]);
+  }, [mode, findPattern, replacePattern, originalNamesKey, batchUpdateFileNames]);
 
   // 模式切换处理
   const handleModeChange = useCallback(
