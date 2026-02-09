@@ -548,31 +548,6 @@ export function AppFooter({
               mode === 'regex' ? 'min-h-[88px]' : 'min-h-[44px]'
             )}
           >
-            {/* 魔法棒按钮 */}
-            {/*
-            {(mode === 'auto' || mode === 'ai') && (
-              <div className="absolute left-2 top-1/2 -translate-y-1/2 z-10">
-                <button
-                  onClick={() => setIsQuickActionsOpen(!isQuickActionsOpen)}
-                  disabled={isEmpty || isDisabled}
-                  className={cn(
-                    'p-1.5 rounded-lg transition-colors',
-                    'text-purple-400 hover:text-purple-500 hover:bg-purple-50 dark:hover:bg-purple-950/30',
-                    (isEmpty || isDisabled) && 'opacity-50 cursor-not-allowed'
-                  )}
-                  title="快捷指令"
-                >
-                  <WandIcon className="h-4 w-4" />
-                </button>
-                <QuickActionsMenu
-                  isOpen={isQuickActionsOpen}
-                  onClose={() => setIsQuickActionsOpen(false)}
-                  onSelectRule={onQuickRule}
-                  onSelectAI={handleSelectAI}
-                />
-              </div>
-            )}
-            */}
 
             {mode === 'regex' ? (
               // 正则模式：双行输入框
