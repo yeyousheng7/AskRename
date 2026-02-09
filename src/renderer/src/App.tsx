@@ -13,6 +13,7 @@ import { AppFooter } from '@/components/AppFooter';
 import { useToast } from '@/hooks/useToast';
 import { useSessionHistory } from '@/hooks/useSessionHistory';
 import { useFileDragOverlay } from '@/hooks/useFileDragOverlay';
+import { useEvent } from '@/hooks/useEvent';
 import { electronApi } from '@/lib/electron-api';
 import { generateAutoDecision } from '@/lib/ai-service';
 import { batchApplyMagicRegex } from '@/lib/magic-regex';
@@ -156,6 +157,7 @@ function App(): React.JSX.Element {
       showToast(`撤销失败：${result.error}`, 'error');
     }
   }, [isUndoing, undo, showToast]);
+  const handleUndoEvent = useEvent(handleUndo);
 
   // AI 生成处理
   const handleRename = useCallback(async () => {
@@ -335,7 +337,7 @@ function App(): React.JSX.Element {
         // 成功时显示带撤销按钮的 Toast
         showToast(`成功重命名 ${result.successCount} 个文件`, 'success', {
           label: '撤销',
-          onClick: handleUndo
+          onClick: handleUndoEvent
         });
         // 重置列表，准备下一轮
         resetAfterApply(result.renamed);
@@ -347,7 +349,7 @@ function App(): React.JSX.Element {
       showToast(message, 'error');
       console.error('应用失败:', err);
     }
-  }, [isApplying, hasChanges, applyRename, resetAfterApply, showToast, handleUndo]);
+  }, [isApplying, hasChanges, applyRename, resetAfterApply, showToast, handleUndoEvent]);
 
   // 确认应用 AI 决策
   const handleConfirmDecision = useCallback(async () => {
@@ -466,7 +468,7 @@ function App(): React.JSX.Element {
         onInstructionChange={(next) => setInstruction(next)}
         onFindPatternChange={(next) => setFindPattern(next)}
         onReplacePatternChange={(next) => setReplacePattern(next)}
-        onUndo={() => void handleUndo()}
+        onUndo={() => void handleUndoEvent()}
         onDiscard={handleDiscard}
         onApply={() => void handleApply()}
         onStop={stopRenaming}

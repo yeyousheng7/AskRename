@@ -57,17 +57,12 @@ export function useFileStore(): UseFileStoreResult {
   const [isUndoing, setIsUndoing] = useState(false);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const filesRef = useRef<FileItem[]>([]);
-  const historyRef = useRef<HistoryItem[]>([]);
   const abortControllerRef = useRef<AbortController | null>(null);
   const highlightTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     filesRef.current = files;
   }, [files]);
-
-  useEffect(() => {
-    historyRef.current = history;
-  }, [history]);
 
   useEffect(() => {
     return () => {
@@ -299,17 +294,13 @@ export function useFileStore(): UseFileStoreResult {
           newPath: item.oldPath
         }));
 
-        setHistory((prev) => {
-          const next = [
-            ...prev,
-            {
-              timestamp: Date.now(),
-              undoItems
-            }
-          ];
-          historyRef.current = next;
-          return next;
-        });
+        setHistory((prev) => [
+          ...prev,
+          {
+            timestamp: Date.now(),
+            undoItems
+          }
+        ]);
       }
 
       return {
@@ -351,8 +342,7 @@ export function useFileStore(): UseFileStoreResult {
 
   // 撤销上一次操作
   const undo = useCallback(async (): Promise<{ success: boolean; error?: string }> => {
-    const currentHistory = historyRef.current;
-    if (currentHistory.length === 0) {
+    if (history.length === 0) {
       return { success: false, error: '没有可撤销的操作' };
     }
 
@@ -360,7 +350,7 @@ export function useFileStore(): UseFileStoreResult {
 
     try {
       // 获取最近一次操作
-      const lastOperation = currentHistory[currentHistory.length - 1];
+      const lastOperation = history[history.length - 1];
 
       // 执行反向重命名
       const result = await electronApi.applyRename(
@@ -375,11 +365,7 @@ export function useFileStore(): UseFileStoreResult {
       }
 
       // 从历史记录中移除
-      setHistory((prev) => {
-        const next = prev.slice(0, -1);
-        historyRef.current = next;
-        return next;
-      });
+      setHistory((prev) => prev.slice(0, -1));
 
       // 更新文件列表：将新路径改回旧路径
       if (result.renamed && result.renamed.length > 0) {
@@ -409,7 +395,7 @@ export function useFileStore(): UseFileStoreResult {
     } finally {
       setIsUndoing(false);
     }
-  }, []);
+  }, [history]);
 
   return {
     files,
