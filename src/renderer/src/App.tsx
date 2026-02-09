@@ -202,7 +202,7 @@ function App(): React.JSX.Element {
         setMode('regex');
         setFindPattern(decision.find);
         setReplacePattern(decision.replace);
-        showToast('AI 已生成正则规则，可以调整后应用', 'success');
+        showToast('✨ 已自动转换为正则规则，可手动修改', 'success');
       } else {
         // AI 返回文件名列表：由于只发送了样本，需要对剩余文件再次调用 AI
         // 简化处理：如果文件数超过样本数，回退到完整 AI 模式
@@ -331,7 +331,7 @@ function App(): React.JSX.Element {
         <EmptyState />
       ) : (
         <ScrollArea className="flex-1">
-          <div className="min-h-full">
+          <div className="min-h-full pb-32">
             {files.map((file, index) => (
               <EditorRow
                 key={file.id}
