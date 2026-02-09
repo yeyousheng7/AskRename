@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useFileStore } from '@/hooks/useFileStore';
 import { useTheme } from '@/hooks/useTheme';
@@ -20,7 +20,16 @@ import { cn } from '@/lib/utils';
 // ============================================================================
 
 function App(): React.JSX.Element {
+  // 模式状态
+  const [mode, setMode] = useState<'ai' | 'regex'>('ai');
+
+  // AI 模式状态
   const [instruction, setInstruction] = useState('');
+
+  // 正则模式状态
+  const [findPattern, setFindPattern] = useState('');
+  const [replacePattern, setReplacePattern] = useState('');
+
   const [error, setError] = useState<string | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
@@ -40,6 +49,7 @@ function App(): React.JSX.Element {
     canUndo,
     removeFile,
     updateFileName,
+    batchUpdateFileNames,
     discardChanges,
     revertFileName,
     applyRule,
@@ -55,6 +65,38 @@ function App(): React.JSX.Element {
 
   // 是否处于审查模式（有待应用的更改）
   const isReviewMode = hasChanges && !isRenaming;
+
+  // 正则实时预览引擎
+  useEffect(() => {
+    if (mode !== 'regex' || files.length === 0) return;
+
+    const newNames = files.map((file) => {
+      if (!findPattern.trim()) return file.original;
+      try {
+        const regex = new RegExp(findPattern, 'g');
+        return file.original.replace(regex, replacePattern);
+      } catch {
+        // 正则语法错误时保持原名
+        return file.original;
+      }
+    });
+
+    batchUpdateFileNames(newNames);
+  }, [mode, findPattern, replacePattern, files.length, batchUpdateFileNames]);
+
+  // 模式切换处理
+  const handleModeChange = useCallback((newMode: 'ai' | 'regex') => {
+    if (newMode === mode) return;
+
+    // 切换时清空输入并重置预览
+    setInstruction('');
+    setFindPattern('');
+    setReplacePattern('');
+    discardChanges();
+    setError(null);
+
+    setMode(newMode);
+  }, [mode, discardChanges]);
 
   const openSettings = useCallback(async () => {
     setIsSettingsOpen(true);
@@ -241,8 +283,12 @@ function App(): React.JSX.Element {
       )}
 
       <AppFooter
+        mode={mode}
+        onModeChange={handleModeChange}
         error={error}
         instruction={instruction}
+        findPattern={findPattern}
+        replacePattern={replacePattern}
         inputRef={inputRef}
         isEmpty={isEmpty}
         isReviewMode={isReviewMode}
@@ -251,6 +297,8 @@ function App(): React.JSX.Element {
         isUndoing={isUndoing}
         canUndo={canUndo}
         onInstructionChange={(next) => setInstruction(next)}
+        onFindPatternChange={(next) => setFindPattern(next)}
+        onReplacePatternChange={(next) => setReplacePattern(next)}
         onUndo={() => void handleUndo()}
         onQuickRule={(handler) => applyRule(handler)}
         onQuickAI={(prompt) => setInstruction(prompt)}

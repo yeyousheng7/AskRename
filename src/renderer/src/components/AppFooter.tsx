@@ -6,15 +6,23 @@ import {
   SquareIcon,
   Undo2Icon,
   WandIcon,
-  XIcon
+  XIcon,
+  Regex
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { QuickActionsMenu } from '@/components/QuickActionsMenu';
+import { cn } from '@/lib/utils';
+
+export type Mode = 'ai' | 'regex';
 
 export function AppFooter({
+  mode,
+  onModeChange,
   error,
   instruction,
+  findPattern,
+  replacePattern,
   inputRef,
   isEmpty,
   isReviewMode,
@@ -23,6 +31,8 @@ export function AppFooter({
   isUndoing,
   canUndo,
   onInstructionChange,
+  onFindPatternChange,
+  onReplacePatternChange,
   onUndo,
   onQuickRule,
   onQuickAI,
@@ -31,8 +41,12 @@ export function AppFooter({
   onStop,
   onGenerate
 }: {
+  mode: Mode;
+  onModeChange: (mode: Mode) => void;
   error: string | null;
   instruction: string;
+  findPattern: string;
+  replacePattern: string;
   inputRef: RefObject<HTMLInputElement | null>;
   isEmpty: boolean;
   isReviewMode: boolean;
@@ -41,6 +55,8 @@ export function AppFooter({
   isUndoing: boolean;
   canUndo: boolean;
   onInstructionChange: (next: string) => void;
+  onFindPatternChange: (next: string) => void;
+  onReplacePatternChange: (next: string) => void;
   onUndo: () => void;
   onQuickRule: (handler: (name: string, index: number) => string) => void;
   onQuickAI: (prompt: string) => void;
@@ -61,6 +77,14 @@ export function AppFooter({
     [inputRef, onQuickAI]
   );
 
+  // 模式切换按钮样式
+  const modeButtonBase =
+    'px-3 py-1.5 text-xs font-medium rounded-md transition-all flex items-center gap-1.5';
+  const modeButtonActive =
+    'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 shadow-sm';
+  const modeButtonInactive =
+    'text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800';
+
   return (
     <footer className="flex-shrink-0 border-t border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-sm p-3">
       {error && (
@@ -69,6 +93,7 @@ export function AppFooter({
         </div>
       )}
       <div className="flex items-center gap-3">
+        {/* 撤销按钮 */}
         <Button
           onClick={onUndo}
           size="icon"
@@ -83,45 +108,94 @@ export function AppFooter({
           )}
         </Button>
 
-        <div className="relative">
-          <Button
-            onClick={() => setIsQuickActionsOpen(!isQuickActionsOpen)}
-            size="icon"
-            variant="ghost"
-            className="text-purple-500 hover:text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-950/30"
-            disabled={isEmpty || isRenaming || isApplying || isUndoing}
-            title="快捷指令"
+        {/* 模式切换 */}
+        <div className="flex rounded-lg border border-zinc-200 dark:border-zinc-700 p-0.5 bg-zinc-50 dark:bg-zinc-800">
+          <button
+            onClick={() => onModeChange('ai')}
+            className={cn(modeButtonBase, mode === 'ai' ? modeButtonActive : modeButtonInactive)}
+            disabled={isRenaming || isApplying || isUndoing}
           >
-            <WandIcon className="h-4 w-4" />
-          </Button>
-          <QuickActionsMenu
-            isOpen={isQuickActionsOpen}
-            onClose={() => setIsQuickActionsOpen(false)}
-            onSelectRule={onQuickRule}
-            onSelectAI={handleSelectAI}
-          />
+            <SparklesIcon className="h-3.5 w-3.5" />
+            AI
+          </button>
+          <button
+            onClick={() => onModeChange('regex')}
+            className={cn(modeButtonBase, mode === 'regex' ? modeButtonActive : modeButtonInactive)}
+            disabled={isRenaming || isApplying || isUndoing}
+          >
+            <Regex className="h-3.5 w-3.5" />
+            正则
+          </button>
         </div>
 
-        <Input
-          ref={inputRef}
-          type="text"
-          placeholder={
-            isReviewMode
-              ? '不满意？修改指令后按回车重新生成...'
-              : '输入重命名指令，例如：将所有图片按日期命名...'
-          }
-          value={instruction}
-          onChange={(e) => onInstructionChange(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault();
-              onGenerate();
-            }
-          }}
-          className="flex-1 font-mono bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500"
-          disabled={isEmpty || isRenaming || isApplying || isUndoing}
-        />
+        {/* AI 模式：快捷指令按钮 */}
+        {mode === 'ai' && (
+          <div className="relative">
+            <Button
+              onClick={() => setIsQuickActionsOpen(!isQuickActionsOpen)}
+              size="icon"
+              variant="ghost"
+              className="text-purple-500 hover:text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-950/30"
+              disabled={isEmpty || isRenaming || isApplying || isUndoing}
+              title="快捷指令"
+            >
+              <WandIcon className="h-4 w-4" />
+            </Button>
+            <QuickActionsMenu
+              isOpen={isQuickActionsOpen}
+              onClose={() => setIsQuickActionsOpen(false)}
+              onSelectRule={onQuickRule}
+              onSelectAI={handleSelectAI}
+            />
+          </div>
+        )}
 
+        {/* 输入区域 - 根据模式动态渲染 */}
+        {mode === 'ai' ? (
+          // AI 模式：单输入框
+          <Input
+            ref={inputRef}
+            type="text"
+            placeholder={
+              isReviewMode
+                ? '不满意？修改指令后按回车重新生成...'
+                : '输入重命名指令，例如：将所有图片按日期命名...'
+            }
+            value={instruction}
+            onChange={(e) => onInstructionChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                onGenerate();
+              }
+            }}
+            className="flex-1 font-mono bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500"
+            disabled={isEmpty || isRenaming || isApplying || isUndoing}
+          />
+        ) : (
+          // 正则模式：查找/替换双输入框
+          <div className="flex flex-1 gap-2">
+            <Input
+              type="text"
+              placeholder="查找 (正则)..."
+              value={findPattern}
+              onChange={(e) => onFindPatternChange(e.target.value)}
+              className="flex-1 font-mono bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500"
+              disabled={isEmpty || isApplying || isUndoing}
+            />
+            <span className="flex items-center text-zinc-400 dark:text-zinc-500">→</span>
+            <Input
+              type="text"
+              placeholder="替换为..."
+              value={replacePattern}
+              onChange={(e) => onReplacePatternChange(e.target.value)}
+              className="flex-1 font-mono bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500"
+              disabled={isEmpty || isApplying || isUndoing}
+            />
+          </div>
+        )}
+
+        {/* 审查模式：放弃和应用按钮 */}
         {isReviewMode ? (
           <>
             <Button
@@ -153,22 +227,29 @@ export function AppFooter({
             </Button>
           </>
         ) : (
+          // 非审查模式
           <>
-            {isRenaming ? (
-              <Button onClick={onStop} variant="destructive" className="px-5">
-                <SquareIcon className="mr-2 h-4 w-4" />
-                停止
-              </Button>
-            ) : (
-              <Button
-                onClick={onGenerate}
-                className="px-5"
-                disabled={isEmpty || !instruction.trim() || isApplying || isUndoing}
-              >
-                <SparklesIcon className="mr-2 h-4 w-4" />
-                生成
-              </Button>
+            {mode === 'ai' && (
+              // AI 模式：生成/停止按钮
+              <>
+                {isRenaming ? (
+                  <Button onClick={onStop} variant="destructive" className="px-5">
+                    <SquareIcon className="mr-2 h-4 w-4" />
+                    停止
+                  </Button>
+                ) : (
+                  <Button
+                    onClick={onGenerate}
+                    className="px-5"
+                    disabled={isEmpty || !instruction.trim() || isApplying || isUndoing}
+                  >
+                    <SparklesIcon className="mr-2 h-4 w-4" />
+                    生成
+                  </Button>
+                )}
+              </>
             )}
+            {/* 正则模式：不显示生成按钮（实时预览） */}
           </>
         )}
       </div>
