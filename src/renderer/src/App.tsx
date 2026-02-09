@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+﻿import { useCallback, useEffect, useRef, useState } from 'react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useFileStore } from '@/hooks/useFileStore';
 import { useTheme } from '@/hooks/useTheme';
@@ -49,6 +49,8 @@ function App(): React.JSX.Element {
 
   const [error, setError] = useState<string | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const settingsOpenTimerRef = useRef<number | null>(null);
+  const [settingsDialogKey, setSettingsDialogKey] = useState(0);
 
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -122,6 +124,25 @@ function App(): React.JSX.Element {
     }
   }, [settings.provider, settings.apiKey, updateSettings]);
 
+  const promptConfigureApiKey = useCallback(() => {
+    showToast('请先配置 API Key 以继续...', 'error');
+    if (settingsOpenTimerRef.current) {
+      window.clearTimeout(settingsOpenTimerRef.current);
+    }
+    settingsOpenTimerRef.current = window.setTimeout(() => {
+      setSettingsDialogKey((k) => k + 1);
+      void openSettings();
+    }, 1500);
+  }, [openSettings, showToast]);
+
+  useEffect(() => {
+    return () => {
+      if (settingsOpenTimerRef.current) {
+        window.clearTimeout(settingsOpenTimerRef.current);
+      }
+    };
+  }, []);
+
   // 撤销处理
   const handleUndo = useCallback(async () => {
     if (isUndoing || !canUndo) return;
@@ -147,8 +168,7 @@ function App(): React.JSX.Element {
       }
 
       if (!apiKeyToUse) {
-        void openSettings();
-        showToast('请先配置 API Key', 'error');
+        promptConfigureApiKey();
         return;
       }
 
@@ -173,9 +193,8 @@ function App(): React.JSX.Element {
     instruction,
     isRenaming,
     files.length,
-    openSettings,
+    promptConfigureApiKey,
     settings,
-    showToast,
     startRenaming,
     updateSettings,
     addToHistory
@@ -195,8 +214,7 @@ function App(): React.JSX.Element {
       }
 
       if (!apiKeyToUse) {
-        void openSettings();
-        showToast('请先配置 API Key', 'error');
+        promptConfigureApiKey();
         return;
       }
 
@@ -256,9 +274,8 @@ function App(): React.JSX.Element {
     instruction,
     aiSession,
     files,
-    openSettings,
+    promptConfigureApiKey,
     settings,
-    showToast,
     updateSettings,
     startRenaming,
     batchUpdateFileNames,
@@ -369,12 +386,15 @@ function App(): React.JSX.Element {
         />
       )}
 
-      <SettingsDialog
-        open={isSettingsOpen}
-        onClose={() => setIsSettingsOpen(false)}
-        settings={settings}
-        updateSettings={updateSettings}
-      />
+      {isSettingsOpen && (
+        <SettingsDialog
+          key={settingsDialogKey}
+          open
+          onClose={() => setIsSettingsOpen(false)}
+          settings={settings}
+          updateSettings={updateSettings}
+        />
+      )}
 
       {/* 拖放覆盖层 */}
       {isDragging && <FileDropOverlay />}
@@ -451,3 +471,4 @@ function App(): React.JSX.Element {
 }
 
 export default App;
+
