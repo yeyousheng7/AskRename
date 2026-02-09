@@ -30,6 +30,7 @@ export type UseFileStoreResult = {
   hasChanges: boolean;
   canUndo: boolean;
   addFiles: (newFiles: FileItem[]) => void;
+  removeFile: (id: string) => void;
   updateFileName: (id: string, newName: string) => void;
   batchUpdateFileNames: (newNames: string[]) => void;
   clearFiles: () => void;
@@ -139,6 +140,11 @@ export function useFileStore(): UseFileStoreResult {
 
   const clearFiles = useCallback(() => {
     setFiles([]);
+  }, []);
+
+  // 移除单个文件（仅从 UI 列表移除，不删除物理文件）
+  const removeFile = useCallback((id: string) => {
+    setFiles((prev) => prev.filter((file) => file.id !== id));
   }, []);
 
   // 放弃更改：将所有 renamed 重置为 original
@@ -400,6 +406,7 @@ export function useFileStore(): UseFileStoreResult {
     hasChanges,
     canUndo,
     addFiles,
+    removeFile,
     updateFileName,
     batchUpdateFileNames,
     clearFiles,

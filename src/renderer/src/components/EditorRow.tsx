@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState, type KeyboardEvent } from 'react';
 import { diffChars } from 'diff';
 import TextareaAutosize from 'react-textarea-autosize';
-import { Undo2 } from 'lucide-react';
+import { Trash2, Undo2 } from 'lucide-react';
 import type { FileItem } from '@/types/file';
 import { cn } from '@/lib/utils';
 
@@ -89,6 +89,7 @@ export type EditorRowProps = {
   setEditingIndex: (next: number | null) => void;
   onRename: (id: string, newName: string) => void;
   onRevert?: (index: number) => void;
+  onRemove?: (id: string) => void;
   isLoading?: boolean;
   isHighlighted?: boolean;
 };
@@ -101,6 +102,7 @@ export default function EditorRow({
   setEditingIndex,
   onRename,
   onRevert,
+  onRemove,
   isLoading = false,
   isHighlighted = false
 }: EditorRowProps): React.JSX.Element {
@@ -162,7 +164,7 @@ export default function EditorRow({
   return (
     <div
       className={cn(
-        'grid grid-cols-[3rem_1fr_3rem_1fr] border-b border-zinc-100 dark:border-zinc-800 transition-colors',
+        'grid grid-cols-[3rem_1fr_3rem_1fr_2.5rem] border-b border-zinc-100 dark:border-zinc-800 transition-colors',
         isHovered && 'bg-blue-50/80 dark:bg-blue-950/20',
         isHighlighted && 'animate-highlight'
       )}
@@ -220,6 +222,21 @@ export default function EditorRow({
             renamed={file.renamed}
             onClick={() => setEditingIndex(index)}
           />
+        )}
+      </div>
+
+      {/* 删除按钮 */}
+      <div className="flex items-start justify-center py-1.5 bg-white dark:bg-zinc-950">
+        {isHovered && onRemove ? (
+          <button
+            onClick={() => onRemove(file.id)}
+            className="p-1 rounded text-zinc-300 hover:text-red-500 hover:bg-red-50 dark:text-zinc-600 dark:hover:text-red-400 dark:hover:bg-red-950/30 transition-colors cursor-pointer"
+            title="从列表中移除"
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
+        ) : (
+          <span className="w-6" />
         )}
       </div>
     </div>

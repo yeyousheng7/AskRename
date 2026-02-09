@@ -38,6 +38,7 @@ function App(): React.JSX.Element {
     isUndoing,
     hasChanges,
     canUndo,
+    removeFile,
     updateFileName,
     discardChanges,
     revertFileName,
@@ -230,6 +231,7 @@ function App(): React.JSX.Element {
                 setEditingIndex={setEditingIndex}
                 onRename={updateFileName}
                 onRevert={revertFileName}
+                onRemove={removeFile}
                 isLoading={isRenaming}
                 isHighlighted={highlightedIds.has(file.id)}
               />
