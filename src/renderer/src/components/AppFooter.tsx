@@ -1,4 +1,4 @@
-import { useCallback, useState, useRef, useEffect, type RefObject } from 'react';
+import { useCallback, useMemo, useState, useRef, useEffect, type RefObject } from 'react';
 import {
   ArrowUpIcon,
   CheckIcon,
@@ -14,6 +14,8 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { QuickActionsMenu } from '@/components/QuickActionsMenu';
+import { HistoryDrawer } from '@/components/HistoryDrawer';
+import { CommandMenu, filterPresets, type Preset } from '@/components/CommandMenu';
 import { cn } from '@/lib/utils';
 
 export type Mode = 'auto' | 'ai' | 'regex';
@@ -83,7 +85,9 @@ export function AppFooter({
   onDiscard,
   onApply,
   onStop,
-  onGenerate
+  onGenerate,
+  history,
+  onSelectHistory
 }: {
   mode: Mode;
   onModeChange: (mode: Mode) => void;
@@ -115,10 +119,36 @@ export function AppFooter({
   onApply: () => void;
   onStop: () => void;
   onGenerate: () => void;
+  // Session History
+  history: string[];
+  onSelectHistory: (text: string) => void;
 }): React.JSX.Element {
   const [isModeMenuOpen, setIsModeMenuOpen] = useState(false);
   const [isQuickActionsOpen, setIsQuickActionsOpen] = useState(false);
+  const [isCommandMenuOpen, setIsCommandMenuOpen] = useState(false);
+  const [commandSelectedIndex, setCommandSelectedIndex] = useState(0);
   const modeMenuRef = useRef<HTMLDivElement>(null);
+
+  // Slash command 过滤
+  const filteredPresets = useMemo(
+    () => (isCommandMenuOpen ? filterPresets(instruction) : []),
+    [isCommandMenuOpen, instruction]
+  );
+
+  // 过滤列表变化时重置选中索引
+  useEffect(() => {
+    setCommandSelectedIndex(0);
+  }, [filteredPresets.length]);
+
+  const handleCommandSelect = useCallback(
+    (preset: Preset) => {
+      onInstructionChange(preset.value);
+      setIsCommandMenuOpen(false);
+      setCommandSelectedIndex(0);
+      setTimeout(() => inputRef.current?.focus(), 50);
+    },
+    [onInstructionChange, inputRef]
+  );
 
   // 点击外部关闭模式菜单
   useEffect(() => {
@@ -182,6 +212,9 @@ export function AppFooter({
           'overflow-visible'
         )}
       >
+        {/* Session History 抽屉 - 仅在非正则模式下显示 */}
+        {mode !== 'regex' && <HistoryDrawer history={history} onSelect={onSelectHistory} />}
+
         {/* 错误提示 */}
         {error && (
           <div className="px-4 pt-3 pb-0">
@@ -450,45 +483,98 @@ export function AppFooter({
                 />
               </div>
             ) : (
-              // Auto/AI 模式：单行输入框
-              <input
-                ref={inputRef as RefObject<HTMLInputElement>}
-                type="text"
-                placeholder={
-                  isReviewMode ? '不满意？修改指令后按回车重新生成...' : '输入自然语言指令...'
-                }
-                value={instruction}
-                onChange={(e) => onInstructionChange(e.target.value)}
-                onKeyDown={(e) => {
-                  // Enter: 发送指令（如果有文本）
-                  if (e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
-                    e.preventDefault();
-                    if (instruction.trim()) {
-                      onGenerate();
-                    }
-                  }
-                  // Cmd/Ctrl + Enter: review 状态下确认应用
-                  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                    e.preventDefault();
-                    if (aiSession === 'review') {
-                      onConfirmDecision();
-                    }
-                  }
-                  // Esc: 放弃当前 AI 建议
-                  if (e.key === 'Escape') {
-                    e.preventDefault();
-                    if (aiSession === 'review') {
-                      onDiscardDecision();
-                    }
-                  }
-                }}
-                disabled={isEmpty || isDisabled}
-                className={cn(
-                  'w-full h-full pl-10 pr-4 py-3 bg-transparent border-0 outline-none',
-                  'text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500',
-                  'text-sm'
+              // Auto/AI 模式：单行输入框 + Slash Command Menu
+              <>
+                {/* Slash Command 悬浮菜单 */}
+                {isCommandMenuOpen && (
+                  <CommandMenu
+                    presets={filteredPresets}
+                    selectedIndex={commandSelectedIndex}
+                    onSelect={handleCommandSelect}
+                    query={instruction.startsWith('/') ? instruction.slice(1) : ''}
+                  />
                 )}
-              />
+                <input
+                  ref={inputRef as RefObject<HTMLInputElement>}
+                  type="text"
+                  placeholder={
+                    isReviewMode
+                      ? '不满意？修改指令后按回车重新生成...'
+                      : '输入自然语言指令... 或 / 选择预设'
+                  }
+                  value={instruction}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    onInstructionChange(val);
+                    // 检测 "/" 触发
+                    if (val.startsWith('/')) {
+                      setIsCommandMenuOpen(true);
+                    } else {
+                      setIsCommandMenuOpen(false);
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    // ===== Slash Command 键盘导航（优先拦截）=====
+                    if (isCommandMenuOpen && filteredPresets.length > 0) {
+                      if (e.key === 'ArrowDown') {
+                        e.preventDefault();
+                        setCommandSelectedIndex(
+                          (prev) => (prev + 1) % filteredPresets.length
+                        );
+                        return;
+                      }
+                      if (e.key === 'ArrowUp') {
+                        e.preventDefault();
+                        setCommandSelectedIndex(
+                          (prev) =>
+                            (prev - 1 + filteredPresets.length) % filteredPresets.length
+                        );
+                        return;
+                      }
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        const selected = filteredPresets[commandSelectedIndex];
+                        if (selected) handleCommandSelect(selected);
+                        return;
+                      }
+                      if (e.key === 'Escape') {
+                        e.preventDefault();
+                        setIsCommandMenuOpen(false);
+                        return;
+                      }
+                    }
+
+                    // ===== 原有键盘逻辑 =====
+                    // Enter: 发送指令（如果有文本）
+                    if (e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
+                      e.preventDefault();
+                      if (instruction.trim()) {
+                        onGenerate();
+                      }
+                    }
+                    // Cmd/Ctrl + Enter: review 状态下确认应用
+                    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                      e.preventDefault();
+                      if (aiSession === 'review') {
+                        onConfirmDecision();
+                      }
+                    }
+                    // Esc: 放弃当前 AI 建议
+                    if (e.key === 'Escape') {
+                      e.preventDefault();
+                      if (aiSession === 'review') {
+                        onDiscardDecision();
+                      }
+                    }
+                  }}
+                  disabled={isEmpty || isDisabled}
+                  className={cn(
+                    'w-full h-full pl-10 pr-4 py-3 bg-transparent border-0 outline-none',
+                    'text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500',
+                    'text-sm'
+                  )}
+                />
+              </>
             )}
           </div>
 

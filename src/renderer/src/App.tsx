@@ -11,6 +11,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { AppHeader } from '@/components/AppHeader';
 import { AppFooter } from '@/components/AppFooter';
 import { useToast } from '@/hooks/useToast';
+import { useSessionHistory } from '@/hooks/useSessionHistory';
 import { useFileDragOverlay } from '@/hooks/useFileDragOverlay';
 import { electronApi } from '@/lib/electron-api';
 import { generateAutoDecision, type AIDecision } from '@/lib/ai-service';
@@ -54,6 +55,7 @@ function App(): React.JSX.Element {
   const { resolvedTheme, toggleTheme } = useTheme();
   const { settings, updateSettings } = useSettings();
   const { toast, showToast, dismissToast } = useToast();
+  const { history, addToHistory } = useSessionHistory();
 
   const {
     files,
@@ -155,6 +157,7 @@ function App(): React.JSX.Element {
     }
 
     setError(null);
+    addToHistory(instruction);
     try {
       await startRenaming(instruction, {
         provider: settings.provider,
@@ -175,7 +178,8 @@ function App(): React.JSX.Element {
     settings,
     showToast,
     startRenaming,
-    updateSettings
+    updateSettings,
+    addToHistory
   ]);
 
   // Auto 模式：AI 决策引擎
@@ -199,6 +203,9 @@ function App(): React.JSX.Element {
 
       updateSettings({ apiKey: apiKeyToUse });
     }
+
+    // 记录指令到历史（在清空前）
+    addToHistory(instruction);
 
     // 立即反馈：清空输入框，设置 loading 状态
     setAISession('loading');
@@ -255,7 +262,8 @@ function App(): React.JSX.Element {
     showToast,
     updateSettings,
     startRenaming,
-    batchUpdateFileNames
+    batchUpdateFileNames,
+    addToHistory
   ]);
 
   // 放弃 AI 决策
@@ -330,6 +338,12 @@ function App(): React.JSX.Element {
     setPendingDecision(null);
     setAISession('idle');
   }, [aiSession, pendingDecision, handleApply]);
+
+  // 历史记录选择：填入输入框并聚焦
+  const handleSelectHistory = useCallback((text: string) => {
+    setInstruction(text);
+    setTimeout(() => inputRef.current?.focus(), 50);
+  }, []);
 
   const { isDragging, rootProps } = useFileDragOverlay(handleDrop);
 
@@ -431,6 +445,8 @@ function App(): React.JSX.Element {
         onApply={() => void handleApply()}
         onStop={stopRenaming}
         onGenerate={() => void (mode === 'auto' ? handleAutoRename() : handleRename())}
+        history={history}
+        onSelectHistory={handleSelectHistory}
       />
     </div>
   );
