@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { EyeIcon, EyeOffIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -33,6 +33,7 @@ export function ApiTab({
     message: string;
   } | null>(null);
   const [isTesting, setIsTesting] = useState(false);
+  const providerLoadSeqRef = useRef(0);
 
   const apiKeyPlaceholder = useMemo(() => {
     if (settings.provider === 'ollama') return 'Ollama 通常不需要 API Key';
@@ -106,6 +107,29 @@ export function ApiTab({
     }
   }, [settings.provider, settings.apiKey]);
 
+  const handleProviderChange = useCallback(
+    async (nextProvider: AISettings['provider']): Promise<void> => {
+      setShowApiKey(false);
+      setSaveError(null);
+      setTestStatus(null);
+
+      // 切换供应商时，立即清空当前内存中的 apiKey，避免不同供应商之间“串 key”。
+      updateSettings({ provider: nextProvider, apiKey: '' });
+
+      if (nextProvider === 'ollama') return;
+
+      const seq = ++providerLoadSeqRef.current;
+      try {
+        const saved = (await electronApi.getApiKey(nextProvider)) || '';
+        if (seq !== providerLoadSeqRef.current) return;
+        updateSettings({ apiKey: saved });
+      } catch {
+        // ignore (keep empty)
+      }
+    },
+    [updateSettings]
+  );
+
   return (
     <div className="space-y-6">
       <div className={fieldGap}>
@@ -113,7 +137,7 @@ export function ApiTab({
         <select
           className={selectClass}
           value={settings.provider}
-          onChange={(e) => updateSettings({ provider: e.target.value as AISettings['provider'] })}
+          onChange={(e) => void handleProviderChange(e.target.value as AISettings['provider'])}
         >
           {Object.keys(PROVIDER_LABELS).map((p) => (
             <option key={p} value={p}>
