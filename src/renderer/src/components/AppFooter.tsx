@@ -14,19 +14,13 @@ import {
 import { Button } from '@/components/ui/button';
 import { HistoryDrawer } from '@/components/HistoryDrawer';
 import { CommandMenu } from '@/components/CommandMenu';
-import { usePresets, type Preset } from '@/hooks/usePresets';
+import { usePresets } from '@/hooks/usePresets';
 import { Input } from '@/components/ui/input';
 import type { ToastType } from '@/hooks/useToast';
+import type { Preset } from '@/types/preset';
+import type { AISessionState, PendingDecision } from '@/types/ai';
+import type { Mode } from '@/types/mode';
 import { cn } from '@/lib/utils';
-
-export type Mode = 'auto' | 'ai' | 'regex';
-export type AISessionState = 'idle' | 'loading' | 'review';
-
-/** Pending AI decision result */
-export type PendingDecision =
-  | { type: 'regex'; find: string; replace: string }
-  | { type: 'list'; names: string[] }
-  | null;
 
 interface ModeConfig {
   id: Mode;

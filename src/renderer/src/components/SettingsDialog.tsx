@@ -12,7 +12,8 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import type { AISettings } from '@/hooks/useSettings';
-import { usePresets, type Preset } from '@/hooks/usePresets';
+import { usePresets } from '@/hooks/usePresets';
+import type { Preset } from '@/types/preset';
 import { cn } from '@/lib/utils';
 import { electronApi } from '@/lib/electron-api';
 import type { ChatMessage } from '@shared/ipc-types';
@@ -58,7 +59,7 @@ function PresetEditor({
 }): React.JSX.Element {
   const [name, setName] = useState(preset?.name ?? '');
   const [content, setContent] = useState(preset?.content ?? '');
-  const [type, setType] = useState<'regex' | 'prompt'>(preset?.type ?? 'prompt');
+  const [type, setType] = useState<Preset['type']>(preset?.type ?? 'prompt');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleSubmit = (): void => {

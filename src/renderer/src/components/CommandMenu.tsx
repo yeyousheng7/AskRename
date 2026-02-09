@@ -1,7 +1,7 @@
 ﻿import { useEffect, useRef } from 'react';
 import { SlashIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { Preset } from '@/hooks/usePresets';
+import type { Preset } from '@/types/preset';
 
 interface CommandMenuProps {
   presets: Preset[];

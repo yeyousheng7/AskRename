@@ -14,19 +14,11 @@ import { useToast } from '@/hooks/useToast';
 import { useSessionHistory } from '@/hooks/useSessionHistory';
 import { useFileDragOverlay } from '@/hooks/useFileDragOverlay';
 import { electronApi } from '@/lib/electron-api';
-import { generateAutoDecision, type AIDecision } from '@/lib/ai-service';
+import { generateAutoDecision } from '@/lib/ai-service';
 import { batchApplyMagicRegex } from '@/lib/magic-regex';
-
-// ============================================================================
-// 类型定义
-// ============================================================================
-
-/** AI Session 状态 */
-export type AISessionState = 'idle' | 'loading' | 'review';
-
-/** 待确认的 AI 决策结果 */
-export type PendingDecision = AIDecision | null;
 import { cn } from '@/lib/utils';
+import type { AISessionState, PendingDecision } from '@/types/ai';
+import type { Mode } from '@/types/mode';
 
 // ============================================================================
 // App 主组件
@@ -34,7 +26,7 @@ import { cn } from '@/lib/utils';
 
 function App(): React.JSX.Element {
   // 模式状态：auto(智能) | ai(纯AI) | regex(纯正则)
-  const [mode, setMode] = useState<'auto' | 'ai' | 'regex'>('auto');
+  const [mode, setMode] = useState<Mode>('auto');
 
   // AI Session 状态：智能模式下的会话状态机
   const [aiSession, setAISession] = useState<AISessionState>('idle');
@@ -97,7 +89,7 @@ function App(): React.JSX.Element {
 
   // 模式切换处理
   const handleModeChange = useCallback(
-    (newMode: 'auto' | 'ai' | 'regex') => {
+    (newMode: Mode) => {
       if (newMode === mode) return;
 
       // 切换时清空输入并重置预览

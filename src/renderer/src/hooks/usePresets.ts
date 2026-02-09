@@ -1,11 +1,5 @@
-﻿import { useCallback, useSyncExternalStore } from 'react';
-
-export interface Preset {
-  id: string;
-  name: string;
-  content: string;
-  type: 'regex' | 'prompt';
-}
+import { useCallback, useSyncExternalStore } from 'react';
+import type { Preset } from '@/types/preset';
 
 const STORAGE_KEY = 'app-presets';
 
