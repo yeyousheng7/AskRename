@@ -7,15 +7,14 @@ import {
   SparklesIcon,
   SquareIcon,
   Undo2Icon,
-  WandIcon,
   XIcon,
   Regex,
   Zap
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { QuickActionsMenu } from '@/components/QuickActionsMenu';
 import { HistoryDrawer } from '@/components/HistoryDrawer';
-import { CommandMenu, filterPresets, type Preset } from '@/components/CommandMenu';
+import { CommandMenu } from '@/components/CommandMenu';
+import { usePresets, type Preset } from '@/hooks/usePresets';
 import { cn } from '@/lib/utils';
 
 export type Mode = 'auto' | 'ai' | 'regex';
@@ -80,8 +79,6 @@ export function AppFooter({
   onFindPatternChange,
   onReplacePatternChange,
   onUndo,
-  onQuickRule,
-  onQuickAI,
   onDiscard,
   onApply,
   onStop,
@@ -113,8 +110,6 @@ export function AppFooter({
   onFindPatternChange: (next: string) => void;
   onReplacePatternChange: (next: string) => void;
   onUndo: () => void;
-  onQuickRule: (handler: (name: string, index: number) => string) => void;
-  onQuickAI: (prompt: string) => void;
   onDiscard: () => void;
   onApply: () => void;
   onStop: () => void;
@@ -124,30 +119,46 @@ export function AppFooter({
   onSelectHistory: (text: string) => void;
 }): React.JSX.Element {
   const [isModeMenuOpen, setIsModeMenuOpen] = useState(false);
-  const [isQuickActionsOpen, setIsQuickActionsOpen] = useState(false);
   const [isCommandMenuOpen, setIsCommandMenuOpen] = useState(false);
   const [commandSelectedIndex, setCommandSelectedIndex] = useState(0);
   const modeMenuRef = useRef<HTMLDivElement>(null);
+  const { presets } = usePresets();
 
   // Slash command 过滤
-  const filteredPresets = useMemo(
-    () => (isCommandMenuOpen ? filterPresets(instruction) : []),
-    [isCommandMenuOpen, instruction]
-  );
+  const filteredPresets = useMemo(() => {
+    if (!isCommandMenuOpen) return [];
+    if (!instruction.startsWith('/')) return [];
+    const query = instruction.slice(1).trim().toLowerCase();
+    if (!query) return presets;
+    return presets.filter(
+      (p) =>
+        p.id.toLowerCase().includes(query) ||
+        p.name.toLowerCase().includes(query) ||
+        p.content.toLowerCase().includes(query)
+    );
+  }, [isCommandMenuOpen, instruction, presets]);
 
   // 过滤列表变化时重置选中索引
-  useEffect(() => {
-    setCommandSelectedIndex(0);
-  }, [filteredPresets.length]);
+  const safeCommandSelectedIndex =
+    filteredPresets.length === 0
+      ? 0
+      : Math.min(commandSelectedIndex, filteredPresets.length - 1);
 
   const handleCommandSelect = useCallback(
     (preset: Preset) => {
-      onInstructionChange(preset.value);
+      if (preset.type === 'regex') {
+        onModeChange('regex');
+        onFindPatternChange(preset.content);
+        onReplacePatternChange('');
+        onInstructionChange('');
+      } else {
+        onInstructionChange(preset.content);
+      }
       setIsCommandMenuOpen(false);
       setCommandSelectedIndex(0);
       setTimeout(() => inputRef.current?.focus(), 50);
     },
-    [onInstructionChange, inputRef]
+    [onInstructionChange, onModeChange, onFindPatternChange, onReplacePatternChange, inputRef]
   );
 
   // 点击外部关闭模式菜单
@@ -160,16 +171,6 @@ export function AppFooter({
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
-
-  const handleSelectAI = useCallback(
-    (prompt: string) => {
-      onQuickAI(prompt);
-      setTimeout(() => {
-        inputRef.current?.focus();
-      }, 50);
-    },
-    [inputRef, onQuickAI]
-  );
 
   const currentMode = MODES.find((m) => m.id === mode) || MODES[0];
   const isDisabled = isRenaming || isApplying || isUndoing;
@@ -430,6 +431,7 @@ export function AppFooter({
             )}
           >
             {/* 魔法棒按钮 */}
+            {/*
             {(mode === 'auto' || mode === 'ai') && (
               <div className="absolute left-2 top-1/2 -translate-y-1/2 z-10">
                 <button
@@ -452,6 +454,7 @@ export function AppFooter({
                 />
               </div>
             )}
+            */}
 
             {mode === 'regex' ? (
               // 正则模式：双行输入框
@@ -489,7 +492,7 @@ export function AppFooter({
                 {isCommandMenuOpen && (
                   <CommandMenu
                     presets={filteredPresets}
-                    selectedIndex={commandSelectedIndex}
+                    selectedIndex={safeCommandSelectedIndex}
                     onSelect={handleCommandSelect}
                     query={instruction.startsWith('/') ? instruction.slice(1) : ''}
                   />
@@ -533,7 +536,7 @@ export function AppFooter({
                       }
                       if (e.key === 'Enter') {
                         e.preventDefault();
-                        const selected = filteredPresets[commandSelectedIndex];
+                        const selected = filteredPresets[safeCommandSelectedIndex];
                         if (selected) handleCommandSelect(selected);
                         return;
                       }
@@ -569,7 +572,7 @@ export function AppFooter({
                   }}
                   disabled={isEmpty || isDisabled}
                   className={cn(
-                    'w-full h-full pl-10 pr-4 py-3 bg-transparent border-0 outline-none',
+                    'w-full h-full pl-4 pr-4 py-3 bg-transparent border-0 outline-none',
                     'text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500',
                     'text-sm'
                   )}

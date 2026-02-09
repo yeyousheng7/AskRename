@@ -70,7 +70,6 @@ function App(): React.JSX.Element {
     batchUpdateFileNames,
     discardChanges,
     revertFileName,
-    applyRule,
     handleDrop,
     startRenaming,
     stopRenaming,
@@ -439,8 +438,6 @@ function App(): React.JSX.Element {
         onFindPatternChange={(next) => setFindPattern(next)}
         onReplacePatternChange={(next) => setReplacePattern(next)}
         onUndo={() => void handleUndo()}
-        onQuickRule={(handler) => applyRule(handler)}
-        onQuickAI={(prompt) => setInstruction(prompt)}
         onDiscard={handleDiscard}
         onApply={() => void handleApply()}
         onStop={stopRenaming}
