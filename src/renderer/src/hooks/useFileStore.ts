@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState, type DragEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react';
 import type { FileItem } from '@/types/file';
 import { generateNewNames, type AIServiceConfig } from '@/lib/ai-service';
 import { ensureExtension } from '@/lib/filename';
@@ -10,6 +10,21 @@ function isAbsolutePathLike(p: string): boolean {
   if (/^[a-zA-Z]:[\\/]/.test(p) || /^\\\\/.test(p)) return true;
   // POSIX: /home/...
   return p.startsWith('/');
+}
+
+function normalizePathKey(p: string): string {
+  const normalizedSlashes = p.replaceAll('/', '\\');
+  // On Windows file paths are generally case-insensitive.
+  if (/^[a-zA-Z]:[\\/]/.test(normalizedSlashes) || /^\\\\/.test(normalizedSlashes)) {
+    return normalizedSlashes.toLowerCase();
+  }
+  return normalizedSlashes;
+}
+
+function getDedupeKey(file: FileItem): string {
+  const p = (file.path || '').trim();
+  if (isAbsolutePathLike(p)) return `path:${normalizePathKey(p)}`;
+  return `name:${file.original}`;
 }
 
 function extractFilePathsFromDataTransfer(dt: DataTransfer): string[] {
@@ -75,6 +90,7 @@ export type HistoryItem = {
 // Hook 返回类型
 export type UseFileStoreResult = {
   files: FileItem[];
+  highlightedIds: Set<string>;
   isRenaming: boolean;
   isApplying: boolean;
   isUndoing: boolean;
@@ -101,11 +117,27 @@ export type UseFileStoreResult = {
 
 export function useFileStore(): UseFileStoreResult {
   const [files, setFiles] = useState<FileItem[]>([]);
+  const [highlightedIds, setHighlightedIds] = useState<Set<string>>(new Set());
   const [isRenaming, setIsRenaming] = useState(false);
   const [isApplying, setIsApplying] = useState(false);
   const [isUndoing, setIsUndoing] = useState(false);
   const [history, setHistory] = useState<HistoryItem[]>([]);
+  const filesRef = useRef<FileItem[]>([]);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const highlightTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    filesRef.current = files;
+  }, [files]);
+
+  useEffect(() => {
+    return () => {
+      if (highlightTimerRef.current) {
+        window.clearTimeout(highlightTimerRef.current);
+        highlightTimerRef.current = null;
+      }
+    };
+  }, []);
 
   // 检查是否有未应用的更改
   const hasChanges = files.some((file) => file.original !== file.renamed);
@@ -115,7 +147,48 @@ export function useFileStore(): UseFileStoreResult {
 
   const addFiles = useCallback((newFiles: FileItem[]) => {
     if (newFiles.length === 0) return;
-    setFiles((prev) => [...prev, ...newFiles]);
+
+    // 收集重复文件的 ID
+    const duplicateIds: string[] = [];
+    const current = filesRef.current;
+
+    const keyToId = new Map(current.map((f) => [getDedupeKey(f), f.id]));
+    const keys = new Set(current.map(getDedupeKey));
+    const next = [...current];
+
+    for (const file of newFiles) {
+      const key = getDedupeKey(file);
+      if (keys.has(key)) {
+        const existingId = keyToId.get(key);
+        if (existingId) duplicateIds.push(existingId);
+        continue;
+      }
+      keys.add(key);
+      keyToId.set(key, file.id);
+      next.push(file);
+    }
+
+    setFiles(next);
+
+    // 触发高亮动画
+    if (duplicateIds.length > 0) {
+      // 清除之前的定时器
+      if (highlightTimerRef.current) {
+        window.clearTimeout(highlightTimerRef.current);
+      }
+
+      // 强制重启动画（同一行被重复触发时，class 不变会导致动画不重新播放）
+      setHighlightedIds(new Set());
+      window.requestAnimationFrame(() => {
+        setHighlightedIds(new Set(duplicateIds));
+      });
+
+      // 1.5 秒后清除高亮
+      highlightTimerRef.current = window.setTimeout(() => {
+        setHighlightedIds(new Set());
+        highlightTimerRef.current = null;
+      }, 1500);
+    }
   }, []);
 
   const updateFileName = useCallback((id: string, newName: string) => {
@@ -398,6 +471,7 @@ export function useFileStore(): UseFileStoreResult {
 
   return {
     files,
+    highlightedIds,
     isRenaming,
     isApplying,
     isUndoing,

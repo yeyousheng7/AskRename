@@ -188,6 +188,7 @@ function App(): React.JSX.Element {
 
   const {
     files,
+    highlightedIds,
     isRenaming,
     isApplying,
     isUndoing,
@@ -550,6 +551,7 @@ function App(): React.JSX.Element {
                 onRename={updateFileName}
                 onRevert={revertFileName}
                 isLoading={isRenaming}
+                isHighlighted={highlightedIds.has(file.id)}
               />
             ))}
           </div>

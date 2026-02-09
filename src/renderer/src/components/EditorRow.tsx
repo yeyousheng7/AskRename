@@ -90,6 +90,7 @@ export type EditorRowProps = {
   onRename: (id: string, newName: string) => void;
   onRevert?: (index: number) => void;
   isLoading?: boolean;
+  isHighlighted?: boolean;
 };
 
 export default function EditorRow({
@@ -100,7 +101,8 @@ export default function EditorRow({
   setEditingIndex,
   onRename,
   onRevert,
-  isLoading = false
+  isLoading = false,
+  isHighlighted = false
 }: EditorRowProps): React.JSX.Element {
   const [isHovered, setIsHovered] = useState(false);
 
@@ -161,7 +163,8 @@ export default function EditorRow({
     <div
       className={cn(
         'grid grid-cols-[3rem_1fr_3rem_1fr] border-b border-zinc-100 dark:border-zinc-800 transition-colors',
-        isHovered && 'bg-blue-50/80 dark:bg-blue-950/20'
+        isHovered && 'bg-blue-50/80 dark:bg-blue-950/20',
+        isHighlighted && 'animate-highlight'
       )}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}

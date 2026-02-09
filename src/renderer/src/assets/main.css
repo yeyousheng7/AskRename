@@ -74,6 +74,44 @@
   }
 }
 
+/* Highlight flash animation for duplicate files */
+@keyframes highlight-flash {
+  0% {
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  30% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 0.7;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.animate-highlight {
+  position: relative;
+}
+
+.animate-highlight::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background-color: hsl(45 93% 70% / 0.6);
+  opacity: 0;
+  animation: highlight-flash 1.5s ease-out forwards;
+}
+
+.dark .animate-highlight::before {
+  background-color: hsl(45 80% 40% / 0.5);
+}
+
 body {
   margin: 0;
   padding: 0;
