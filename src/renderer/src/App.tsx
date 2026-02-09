@@ -13,8 +13,18 @@ import { AppFooter } from '@/components/AppFooter';
 import { useToast } from '@/hooks/useToast';
 import { useFileDragOverlay } from '@/hooks/useFileDragOverlay';
 import { electronApi } from '@/lib/electron-api';
-import { generateAutoDecision } from '@/lib/ai-service';
+import { generateAutoDecision, type AIDecision } from '@/lib/ai-service';
 import { batchApplyMagicRegex } from '@/lib/magic-regex';
+
+// ============================================================================
+// 类型定义
+// ============================================================================
+
+/** AI Session 状态 */
+export type AISessionState = 'idle' | 'loading' | 'review';
+
+/** 待确认的 AI 决策结果 */
+export type PendingDecision = AIDecision | null;
 import { cn } from '@/lib/utils';
 
 // ============================================================================
@@ -24,6 +34,10 @@ import { cn } from '@/lib/utils';
 function App(): React.JSX.Element {
   // 模式状态：auto(智能) | ai(纯AI) | regex(纯正则)
   const [mode, setMode] = useState<'auto' | 'ai' | 'regex'>('auto');
+
+  // AI Session 状态：智能模式下的会话状态机
+  const [aiSession, setAISession] = useState<AISessionState>('idle');
+  const [pendingDecision, setPendingDecision] = useState<PendingDecision>(null);
 
   // AI 模式状态
   const [instruction, setInstruction] = useState('');
@@ -166,7 +180,7 @@ function App(): React.JSX.Element {
 
   // Auto 模式：AI 决策引擎
   const handleAutoRename = useCallback(async () => {
-    if (isRenaming || files.length === 0 || !instruction.trim()) return;
+    if (aiSession === 'loading' || files.length === 0 || !instruction.trim()) return;
 
     // 获取 API Key
     let apiKeyToUse = settings.apiKey.trim();
@@ -186,7 +200,11 @@ function App(): React.JSX.Element {
       updateSettings({ apiKey: apiKeyToUse });
     }
 
+    // 立即反馈：清空输入框，设置 loading 状态
+    setAISession('loading');
+    setInstruction('');
     setError(null);
+
     try {
       // 调用 AI 获取决策
       const fileNames = files.map((f) => f.original);
@@ -198,16 +216,17 @@ function App(): React.JSX.Element {
       });
 
       if (decision.type === 'regex') {
-        // AI 决定使用正则：切换到正则模式并填入规则
-        setMode('regex');
-        setFindPattern(decision.find);
-        setReplacePattern(decision.replace);
-        showToast('✨ 已自动转换为正则规则，可手动修改', 'success');
+        // AI 决定使用正则：【不切换模式】，存入 pendingDecision，应用预览
+        setPendingDecision(decision);
+        // 应用正则预览
+        const newNames = batchApplyMagicRegex(fileNames, decision.find, decision.replace);
+        batchUpdateFileNames(newNames);
+        setAISession('review');
       } else {
-        // AI 返回文件名列表：由于只发送了样本，需要对剩余文件再次调用 AI
-        // 简化处理：如果文件数超过样本数，回退到完整 AI 模式
+        // AI 返回文件名列表
         if (files.length > 20) {
-          // 文件超过样本数，需要完整 AI 处理
+          // 文件超过样本数，需要完整 AI 处理（回退到 startRenaming）
+          setAISession('idle');
           await startRenaming(instruction, {
             provider: settings.provider,
             apiKey: apiKeyToUse,
@@ -216,17 +235,20 @@ function App(): React.JSX.Element {
           });
         } else {
           // 文件数在样本范围内，直接使用返回结果
+          setPendingDecision(decision);
           batchUpdateFileNames(decision.names);
+          setAISession('review');
         }
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'AI 决策失败，请重试';
       setError(message);
+      setAISession('idle');
       console.error('Auto rename failed:', err);
     }
   }, [
     instruction,
-    isRenaming,
+    aiSession,
     files,
     openSettings,
     settings,
@@ -235,6 +257,27 @@ function App(): React.JSX.Element {
     startRenaming,
     batchUpdateFileNames
   ]);
+
+  // 放弃 AI 决策
+  const handleDiscardDecision = useCallback(() => {
+    if (aiSession !== 'review') return;
+    discardChanges();
+    setPendingDecision(null);
+    setAISession('idle');
+  }, [aiSession, discardChanges]);
+
+  // 更新待定的正则规则（用于 Action Card 编辑）
+  const handleUpdatePendingRegex = useCallback(
+    (find: string, replace: string) => {
+      if (pendingDecision?.type !== 'regex') return;
+      setPendingDecision({ type: 'regex', find, replace });
+      // 实时预览
+      const fileNames = files.map((f) => f.original);
+      const newNames = batchApplyMagicRegex(fileNames, find, replace);
+      batchUpdateFileNames(newNames);
+    },
+    [pendingDecision, files, batchUpdateFileNames]
+  );
 
   // 放弃更改
   const handleDiscard = useCallback(() => {
@@ -279,6 +322,14 @@ function App(): React.JSX.Element {
       console.error('应用失败:', err);
     }
   }, [isApplying, hasChanges, applyRename, resetAfterApply, showToast, handleUndo]);
+
+  // 确认应用 AI 决策
+  const handleConfirmDecision = useCallback(async () => {
+    if (aiSession !== 'review' || !pendingDecision) return;
+    await handleApply();
+    setPendingDecision(null);
+    setAISession('idle');
+  }, [aiSession, pendingDecision, handleApply]);
 
   const { isDragging, rootProps } = useFileDragOverlay(handleDrop);
 
@@ -365,6 +416,11 @@ function App(): React.JSX.Element {
         isApplying={isApplying}
         isUndoing={isUndoing}
         canUndo={canUndo}
+        aiSession={aiSession}
+        pendingDecision={pendingDecision}
+        onConfirmDecision={() => void handleConfirmDecision()}
+        onDiscardDecision={handleDiscardDecision}
+        onUpdatePendingRegex={handleUpdatePendingRegex}
         onInstructionChange={(next) => setInstruction(next)}
         onFindPatternChange={(next) => setFindPattern(next)}
         onReplacePatternChange={(next) => setReplacePattern(next)}

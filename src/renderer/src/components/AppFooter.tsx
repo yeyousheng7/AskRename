@@ -17,6 +17,13 @@ import { QuickActionsMenu } from '@/components/QuickActionsMenu';
 import { cn } from '@/lib/utils';
 
 export type Mode = 'auto' | 'ai' | 'regex';
+export type AISessionState = 'idle' | 'loading' | 'review';
+
+/** Pending AI decision result */
+export type PendingDecision =
+  | { type: 'regex'; find: string; replace: string }
+  | { type: 'list'; names: string[] }
+  | null;
 
 interface ModeConfig {
   id: Mode;
@@ -60,6 +67,13 @@ export function AppFooter({
   isApplying,
   isUndoing,
   canUndo,
+  // AI Session 新增
+  aiSession,
+  pendingDecision,
+  onConfirmDecision,
+  onDiscardDecision,
+  onUpdatePendingRegex,
+  // 原有回调
   onInstructionChange,
   onFindPatternChange,
   onReplacePatternChange,
@@ -84,6 +98,13 @@ export function AppFooter({
   isApplying: boolean;
   isUndoing: boolean;
   canUndo: boolean;
+  // AI Session 新增
+  aiSession: AISessionState;
+  pendingDecision: PendingDecision;
+  onConfirmDecision: () => void;
+  onDiscardDecision: () => void;
+  onUpdatePendingRegex: (find: string, replace: string) => void;
+  // 原有回调
   onInstructionChange: (next: string) => void;
   onFindPatternChange: (next: string) => void;
   onReplacePatternChange: (next: string) => void;
@@ -170,8 +191,85 @@ export function AppFooter({
           </div>
         )}
 
-        {/* 审查模式操作栏 */}
-        {isReviewMode && (
+        {/* Action Card - 智能模式下的 AI 决策预览卡片 */}
+        {aiSession === 'review' && mode === 'auto' && pendingDecision && (
+          <div className="mx-3 mt-3 p-3 rounded-xl bg-gradient-to-br from-purple-50/80 to-blue-50/80 dark:from-purple-950/40 dark:to-blue-950/40 ring-1 ring-purple-200/50 dark:ring-purple-800/30">
+            {pendingDecision.type === 'regex' ? (
+              <>
+                <div className="text-xs font-medium text-purple-600 dark:text-purple-400 mb-2 flex items-center gap-1.5">
+                  <Regex className="h-3.5 w-3.5" />
+                  AI 生成了正则规则，可编辑微调
+                </div>
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs text-zinc-500 dark:text-zinc-400 w-10 shrink-0">
+                      查找
+                    </label>
+                    <input
+                      type="text"
+                      value={pendingDecision.find}
+                      onChange={(e) =>
+                        onUpdatePendingRegex(e.target.value, pendingDecision.replace)
+                      }
+                      className="flex-1 px-2.5 py-1.5 text-sm font-mono bg-white dark:bg-zinc-900 rounded-lg ring-1 ring-zinc-200/50 dark:ring-zinc-700/50 focus:ring-purple-400 dark:focus:ring-purple-600 outline-none transition-all"
+                      placeholder="正则表达式"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs text-zinc-500 dark:text-zinc-400 w-10 shrink-0">
+                      替换
+                    </label>
+                    <input
+                      type="text"
+                      value={pendingDecision.replace}
+                      onChange={(e) => onUpdatePendingRegex(pendingDecision.find, e.target.value)}
+                      className="flex-1 px-2.5 py-1.5 text-sm font-mono bg-white dark:bg-zinc-900 rounded-lg ring-1 ring-zinc-200/50 dark:ring-zinc-700/50 focus:ring-purple-400 dark:focus:ring-purple-600 outline-none transition-all"
+                      placeholder="替换内容 (支持 ${i} 序号)"
+                    />
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="text-xs font-medium text-purple-600 dark:text-purple-400 flex items-center gap-1.5">
+                <SparklesIcon className="h-3.5 w-3.5" />
+                AI 已生成新文件名，预览已就绪
+              </div>
+            )}
+            <div className="flex justify-end gap-2 mt-3">
+              <Button
+                onClick={onDiscardDecision}
+                variant="ghost"
+                size="sm"
+                className="text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
+                disabled={isApplying}
+              >
+                <XIcon className="mr-1 h-3.5 w-3.5" />
+                放弃
+              </Button>
+              <Button
+                onClick={onConfirmDecision}
+                size="sm"
+                className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                disabled={isApplying}
+              >
+                {isApplying ? (
+                  <>
+                    <LoaderIcon className="mr-1 h-3.5 w-3.5 animate-spin" />
+                    应用中...
+                  </>
+                ) : (
+                  <>
+                    <CheckIcon className="mr-1 h-3.5 w-3.5" />
+                    确认应用
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* 非智能模式的审查模式操作栏 */}
+        {isReviewMode && (mode !== 'auto' || aiSession !== 'review') && (
           <div className="flex items-center justify-between px-4 pt-3 pb-0">
             <span className="text-sm text-zinc-500 dark:text-zinc-400">
               预览已就绪，确认应用更改？
@@ -362,9 +460,26 @@ export function AppFooter({
                 value={instruction}
                 onChange={(e) => onInstructionChange(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
+                  // Enter: 发送指令（如果有文本）
+                  if (e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
                     e.preventDefault();
-                    onGenerate();
+                    if (instruction.trim()) {
+                      onGenerate();
+                    }
+                  }
+                  // Cmd/Ctrl + Enter: review 状态下确认应用
+                  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                    e.preventDefault();
+                    if (aiSession === 'review') {
+                      onConfirmDecision();
+                    }
+                  }
+                  // Esc: 放弃当前 AI 建议
+                  if (e.key === 'Escape') {
+                    e.preventDefault();
+                    if (aiSession === 'review') {
+                      onDiscardDecision();
+                    }
                   }
                 }}
                 disabled={isEmpty || isDisabled}
@@ -379,19 +494,53 @@ export function AppFooter({
 
           {/* 右侧：Submit 按钮 */}
           <div className="flex items-center pr-3">
-            {isRenaming ? (
+            {isRenaming || aiSession === 'loading' ? (
+              // Loading 或 Renaming 状态：显示停止按钮或 Spinner
+              aiSession === 'loading' ? (
+                <div
+                  className={cn(
+                    'h-9 w-9 rounded-full flex items-center justify-center',
+                    'bg-zinc-200 dark:bg-zinc-700 text-zinc-400 dark:text-zinc-500'
+                  )}
+                  title="生成中..."
+                >
+                  <LoaderIcon className="h-4 w-4 animate-spin" />
+                </div>
+              ) : (
+                <button
+                  onClick={onStop}
+                  className={cn(
+                    'h-9 w-9 rounded-full flex items-center justify-center',
+                    'bg-red-500 text-white hover:bg-red-600',
+                    'transition-all duration-200 hover:scale-105'
+                  )}
+                  title="停止生成"
+                >
+                  <SquareIcon className="h-3.5 w-3.5" />
+                </button>
+              )
+            ) : aiSession === 'review' && mode === 'auto' && !instruction.trim() ? (
+              // Review 状态且无文本：显示确认按钮
               <button
-                onClick={onStop}
+                onClick={onConfirmDecision}
+                disabled={isApplying}
                 className={cn(
                   'h-9 w-9 rounded-full flex items-center justify-center',
-                  'bg-red-500 text-white hover:bg-red-600',
-                  'transition-all duration-200 hover:scale-105'
+                  'transition-all duration-200',
+                  !isApplying
+                    ? 'bg-emerald-600 text-white hover:bg-emerald-700 hover:scale-105'
+                    : 'bg-zinc-200 dark:bg-zinc-700 text-zinc-400 dark:text-zinc-500 cursor-not-allowed'
                 )}
-                title="停止生成"
+                title="确认应用 (Ctrl+Enter)"
               >
-                <SquareIcon className="h-3.5 w-3.5" />
+                {isApplying ? (
+                  <LoaderIcon className="h-4 w-4 animate-spin" />
+                ) : (
+                  <CheckIcon className="h-4 w-4" />
+                )}
               </button>
             ) : (
+              // 其他状态：显示发送按钮
               <button
                 onClick={mode === 'regex' && isReviewMode ? onApply : onGenerate}
                 disabled={isEmpty || !canSubmit || isDisabled}

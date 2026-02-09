@@ -230,6 +230,9 @@ function parseAndValidateResponse(content: string, expectedLength: number): stri
 
 import type { AIDecision } from '@shared/ipc-types';
 
+// Re-export for external use
+export type { AIDecision };
+
 /** 决策模式采样数量：只发送前 N 个文件名给 AI 以节省 Token */
 const DECISION_SAMPLE_SIZE = 20;
 
