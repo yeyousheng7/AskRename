@@ -4,4 +4,3 @@ export type AISessionState = 'idle' | 'loading' | 'review';
 export type PendingDecision = AIDecision | null;
 
 export type { AIDecision };
-

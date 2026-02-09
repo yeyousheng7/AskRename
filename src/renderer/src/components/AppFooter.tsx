@@ -188,9 +188,7 @@ export function AppFooter({
 
   // 过滤列表变化时重置选中索引
   const safeCommandSelectedIndex =
-    filteredPresets.length === 0
-      ? 0
-      : Math.min(commandSelectedIndex, filteredPresets.length - 1);
+    filteredPresets.length === 0 ? 0 : Math.min(commandSelectedIndex, filteredPresets.length - 1);
 
   const handleCommandSelect = useCallback(
     (preset: Preset) => {
@@ -542,7 +540,6 @@ export function AppFooter({
               mode === 'regex' ? 'min-h-[88px]' : 'min-h-[44px]'
             )}
           >
-
             {mode === 'regex' ? (
               // 正则模式：双行输入框
               <div className="h-full flex flex-col">
@@ -616,16 +613,13 @@ export function AppFooter({
                     if (isCommandMenuOpen && filteredPresets.length > 0) {
                       if (e.key === 'ArrowDown') {
                         e.preventDefault();
-                        setCommandSelectedIndex(
-                          (prev) => (prev + 1) % filteredPresets.length
-                        );
+                        setCommandSelectedIndex((prev) => (prev + 1) % filteredPresets.length);
                         return;
                       }
                       if (e.key === 'ArrowUp') {
                         e.preventDefault();
                         setCommandSelectedIndex(
-                          (prev) =>
-                            (prev - 1 + filteredPresets.length) % filteredPresets.length
+                          (prev) => (prev - 1 + filteredPresets.length) % filteredPresets.length
                         );
                         return;
                       }

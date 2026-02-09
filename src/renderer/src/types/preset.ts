@@ -6,4 +6,3 @@ export interface Preset {
   content: string;
   type: PresetType;
 }
-

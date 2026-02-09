@@ -19,6 +19,7 @@ import { batchApplyMagicRegex } from '@/lib/magic-regex';
 import { cn } from '@/lib/utils';
 import type { AISessionState, PendingDecision } from '@/types/ai';
 import type { Mode } from '@/types/mode';
+import type { SettingsTabId } from '@/types/settings';
 
 // ============================================================================
 // App 主组件
@@ -42,7 +43,7 @@ function App(): React.JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const settingsOpenTimerRef = useRef<number | null>(null);
-  const [settingsDialogKey, setSettingsDialogKey] = useState(0);
+  const [settingsForcedTab, setSettingsForcedTab] = useState<SettingsTabId | null>(null);
 
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -122,7 +123,7 @@ function App(): React.JSX.Element {
       window.clearTimeout(settingsOpenTimerRef.current);
     }
     settingsOpenTimerRef.current = window.setTimeout(() => {
-      setSettingsDialogKey((k) => k + 1);
+      setSettingsForcedTab('api');
       void openSettings();
     }, 1500);
   }, [openSettings, showToast]);
@@ -380,9 +381,13 @@ function App(): React.JSX.Element {
 
       {isSettingsOpen && (
         <SettingsDialog
-          key={settingsDialogKey}
           open
-          onClose={() => setIsSettingsOpen(false)}
+          forcedTab={settingsForcedTab}
+          onClearForcedTab={() => setSettingsForcedTab(null)}
+          onClose={() => {
+            setSettingsForcedTab(null);
+            setIsSettingsOpen(false);
+          }}
           settings={settings}
           updateSettings={updateSettings}
         />
@@ -399,7 +404,10 @@ function App(): React.JSX.Element {
         hasChanges={hasChanges}
         resolvedTheme={resolvedTheme}
         onToggleTheme={toggleTheme}
-        onOpenSettings={() => void openSettings()}
+        onOpenSettings={() => {
+          setSettingsForcedTab(null);
+          void openSettings();
+        }}
       />
 
       {/* 文件列表 */}
@@ -463,4 +471,3 @@ function App(): React.JSX.Element {
 }
 
 export default App;
-
