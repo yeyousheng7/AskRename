@@ -22,6 +22,8 @@ import SortableItem from '@/components/SortableItem';
 
 export type FileListProps = {
   files: FileItem[];
+  indexOffset: number;
+  totalFilesLength: number;
   highlightedIds: Set<string>;
   editingIndex: number | null;
   setEditingIndex: (next: number | null) => void;
@@ -36,6 +38,8 @@ export type FileListProps = {
 
 export default function FileList({
   files,
+  indexOffset,
+  totalFilesLength,
   highlightedIds,
   editingIndex,
   setEditingIndex,
@@ -85,10 +89,10 @@ export default function FileList({
       const newIndex = ids.indexOf(String(over.id));
       if (oldIndex === -1 || newIndex === -1) return;
 
-      reorderFiles(oldIndex, newIndex);
+      reorderFiles(indexOffset + oldIndex, indexOffset + newIndex);
       onAfterReorder();
     },
-    [ids, reorderFiles, onAfterReorder, isDisabled]
+    [ids, reorderFiles, onAfterReorder, isDisabled, indexOffset]
   );
 
   return (
@@ -101,12 +105,12 @@ export default function FileList({
     >
       <SortableContext items={ids} strategy={verticalListSortingStrategy}>
         <div className="min-h-full pb-32">
-          {files.map((file, index) => (
+          {files.map((file, localIndex) => (
             <SortableItem
               key={file.id}
               file={file}
-              index={index}
-              filesLength={files.length}
+              index={indexOffset + localIndex}
+              filesLength={totalFilesLength}
               editingIndex={editingIndex}
               setEditingIndex={setEditingIndex}
               onRename={onRename}
@@ -127,8 +131,8 @@ export default function FileList({
               <div className="opacity-90 shadow-2xl">
                 <EditorRow
                   file={activeFile}
-                  index={ids.indexOf(activeFile.id)}
-                  filesLength={files.length}
+                  index={indexOffset + ids.indexOf(activeFile.id)}
+                  filesLength={totalFilesLength}
                   editingIndex={editingIndex}
                   setEditingIndex={setEditingIndex}
                   onRename={onRename}

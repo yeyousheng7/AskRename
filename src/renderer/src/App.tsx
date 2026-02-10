@@ -6,6 +6,7 @@ import { useSettings } from '@/hooks/useSettings';
 import FileList from '@/components/FileList';
 import { ProgressOverlay } from '@/components/ProgressOverlay';
 import { SmartWarningDialog } from '@/components/SmartWarningDialog';
+import { PaginationBar } from '@/components/PaginationBar';
 import { SettingsDialog } from '@/components/SettingsDialog';
 import { Toast } from '@/components/Toast';
 import { FileDropOverlay } from '@/components/FileDropOverlay';
@@ -32,6 +33,9 @@ import type { SettingsTabId } from '@/types/settings';
 function hasMagicIndexVars(text: string): boolean {
   return /\$\{i(?:0|00|000)?\}/.test(text);
 }
+
+const PAGINATION_THRESHOLD = 100;
+const DEFAULT_PAGE_SIZE = 50;
 
 function App(): React.JSX.Element {
   // 模式状态：auto(智能) | ai(纯AI) | regex(纯正则)
@@ -85,6 +89,8 @@ function App(): React.JSX.Element {
   } = useFileStore();
 
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
+  const [pageIndex, setPageIndex] = useState<number>(0);
 
   // 是否处于审查模式（有待应用的更改）
   const isReviewMode = hasChanges && !isRenaming && batchAI.status === 'idle';
@@ -487,6 +493,26 @@ function App(): React.JSX.Element {
   const { isDragging, rootProps } = useFileDragOverlay(handleDrop);
 
   const isEmpty = files.length === 0;
+  const isPagingEnabled = files.length > PAGINATION_THRESHOLD && Number.isFinite(pageSize);
+  const effectivePageSize = isPagingEnabled ? pageSize : files.length || 1;
+  const pageCount = Math.max(1, Math.ceil(files.length / effectivePageSize));
+  const clampedPageIndex = Math.min(pageIndex, pageCount - 1);
+  const pageStart = clampedPageIndex * effectivePageSize;
+  const pageFiles = isPagingEnabled ? files.slice(pageStart, pageStart + effectivePageSize) : files;
+
+  useEffect(() => {
+    if (clampedPageIndex !== pageIndex) setPageIndex(clampedPageIndex);
+  }, [clampedPageIndex, pageIndex]);
+
+  const setEditingIndexWithPaging = useCallback(
+    (next: number | null) => {
+      if (next !== null && isPagingEnabled) {
+        setPageIndex(Math.floor(next / effectivePageSize));
+      }
+      setEditingIndex(next);
+    },
+    [isPagingEnabled, effectivePageSize]
+  );
 
   return (
     <div
@@ -578,12 +604,29 @@ function App(): React.JSX.Element {
       {isEmpty ? (
         <EmptyState />
       ) : (
-        <ScrollArea className="flex-1">
+        <>
+          {files.length > PAGINATION_THRESHOLD && (
+            <PaginationBar
+              total={files.length}
+              pageIndex={clampedPageIndex}
+              pageCount={pageCount}
+              pageSize={pageSize}
+              onPageIndexChange={(next) => setPageIndex(Math.min(Math.max(0, next), pageCount - 1))}
+              onPageSizeChange={(next) => {
+                setPageSize(next);
+                setPageIndex(0);
+              }}
+            />
+          )}
+
+          <ScrollArea key={`${clampedPageIndex}:${pageSize}:${files.length}`} className="flex-1 min-h-0">
           <FileList
-            files={files}
+            files={pageFiles}
+            indexOffset={pageStart}
+            totalFilesLength={files.length}
             highlightedIds={highlightedIds}
             editingIndex={editingIndex}
-            setEditingIndex={setEditingIndex}
+            setEditingIndex={setEditingIndexWithPaging}
             onRename={updateFileName}
             onRevert={revertFileName}
             onRemove={removeFile}
@@ -592,7 +635,8 @@ function App(): React.JSX.Element {
             isLoading={isRenaming}
             isDisabled={isRenaming || isApplying || isUndoing || batchAI.status === 'processing'}
           />
-        </ScrollArea>
+          </ScrollArea>
+        </>
       )}
 
       <AppFooter
