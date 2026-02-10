@@ -13,7 +13,9 @@ import type {
   RenameError,
   RenameFileItem,
   RenamedItem,
-  RenameResult
+  RenameResult,
+  ScannedFileItem,
+  ScanDirectoryResult
 } from '@shared/ipc-types';
 
 // ============================================================================
@@ -446,6 +448,41 @@ export function registerAIHandlers(): void {
       }
 
       return { successCount, errors, renamed };
+    }
+  );
+
+  // 目录递归扫描 Handler
+  ipcMain.handle(
+    'app:scan-directory',
+    async (_event, dirs: string[]): Promise<ScanDirectoryResult> => {
+      const files: ScannedFileItem[] = [];
+      const errors: string[] = [];
+
+      for (const dir of dirs) {
+        try {
+          const entries = await fs.readdir(dir, { recursive: true });
+          for (const entry of entries) {
+            const entryStr = typeof entry === 'string' ? entry : String(entry);
+            const fullPath = path.join(dir, entryStr);
+            try {
+              const stat = await fs.stat(fullPath);
+              if (stat.isFile()) {
+                files.push({
+                  name: path.basename(fullPath),
+                  path: fullPath
+                });
+              }
+            } catch {
+              // skip inaccessible entries
+            }
+          }
+        } catch (err) {
+          const message = err instanceof Error ? err.message : '未知错误';
+          errors.push(`${dir}: ${message}`);
+        }
+      }
+
+      return { files, errors };
     }
   );
 }

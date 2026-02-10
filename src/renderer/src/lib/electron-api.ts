@@ -4,7 +4,8 @@ import type {
   AIProvider,
   ChatMessage,
   RenameFileItem,
-  RenameResult
+  RenameResult,
+  ScanDirectoryResult
 } from '@shared/ipc-types';
 
 function getApi(): Window['api'] {
@@ -41,5 +42,9 @@ export const electronApi = {
 
   setApiKey(provider: AIProvider, apiKey: string): Promise<void> {
     return getApi().setApiKey(provider, apiKey);
+  },
+
+  scanDirectory(dirs: string[]): Promise<ScanDirectoryResult> {
+    return getApi().scanDirectory(dirs);
   }
 } as const;

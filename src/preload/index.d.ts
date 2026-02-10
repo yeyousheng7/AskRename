@@ -5,7 +5,8 @@ import type {
   AIProvider,
   ChatMessage,
   RenameFileItem,
-  RenameResult
+  RenameResult,
+  ScanDirectoryResult
 } from '@shared/ipc-types';
 
 interface CustomAPI {
@@ -19,6 +20,7 @@ interface CustomAPI {
   applyRename: (files: RenameFileItem[]) => Promise<RenameResult>;
   getApiKey: (provider: AIProvider) => Promise<string>;
   setApiKey: (provider: AIProvider, apiKey: string) => Promise<void>;
+  scanDirectory: (dirs: string[]) => Promise<ScanDirectoryResult>;
 }
 
 declare global {

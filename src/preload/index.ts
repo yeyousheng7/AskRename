@@ -6,7 +6,8 @@ import type {
   ChatMessage,
   AIProvider,
   RenameFileItem,
-  RenameResult
+  RenameResult,
+  ScanDirectoryResult
 } from '@shared/ipc-types';
 
 // ============================================================================
@@ -78,6 +79,13 @@ const api = {
    */
   setApiKey: (provider: AIProvider, apiKey: string): Promise<void> => {
     return ipcRenderer.invoke('settings:set-api-key', { provider, apiKey });
+  },
+
+  /**
+   * 递归扫描目录，返回所有文件
+   */
+  scanDirectory: (dirs: string[]): Promise<ScanDirectoryResult> => {
+    return ipcRenderer.invoke('app:scan-directory', dirs);
   }
 };
 

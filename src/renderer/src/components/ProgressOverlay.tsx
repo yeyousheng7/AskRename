@@ -90,7 +90,11 @@ export function ProgressOverlay({
                     <div className="min-w-0 truncate">
                       Batch {b.batchIndex + 1}（{b.items.length} 个）
                     </div>
-                    <Button size="sm" variant="secondary" onClick={() => onRetryBatch(b.batchIndex)}>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => onRetryBatch(b.batchIndex)}
+                    >
                       重试
                     </Button>
                   </div>
@@ -103,4 +107,3 @@ export function ProgressOverlay({
     </div>
   );
 }
-

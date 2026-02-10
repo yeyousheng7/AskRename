@@ -63,3 +63,16 @@ export interface RenameResult {
 export type AIDecision =
   | { type: 'regex'; find: string; replace: string }
   | { type: 'list'; names: string[] };
+
+// 目录扫描结果
+export interface ScannedFileItem {
+  /** 文件名 (basename) */
+  name: string;
+  /** 绝对路径 */
+  path: string;
+}
+
+export interface ScanDirectoryResult {
+  files: ScannedFileItem[];
+  errors: string[];
+}

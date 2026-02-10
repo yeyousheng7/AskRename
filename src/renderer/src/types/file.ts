@@ -4,3 +4,5 @@ export interface FileItem {
   renamed: string;
   path: string;
 }
+
+export type TargetMode = 'file' | 'folder';

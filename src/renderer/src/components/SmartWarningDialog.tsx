@@ -81,4 +81,3 @@ export function SmartWarningDialog({
     </div>
   );
 }
-

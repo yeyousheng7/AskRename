@@ -68,11 +68,13 @@ function App(): React.JSX.Element {
   const {
     files,
     highlightedIds,
+    targetMode,
     isRenaming,
     isApplying,
     isUndoing,
     hasChanges,
     canUndo,
+    setTargetMode,
     removeFile,
     reorderFiles,
     updateFileName,
@@ -217,7 +219,12 @@ function App(): React.JSX.Element {
   // AI 生成处理
   const doRename = useCallback(async () => {
     if (mode !== 'ai') return;
-    if (isRenaming || batchAI.status === 'processing' || files.length === 0 || !instruction.trim()) {
+    if (
+      isRenaming ||
+      batchAI.status === 'processing' ||
+      files.length === 0 ||
+      !instruction.trim()
+    ) {
       return;
     }
 
@@ -292,7 +299,12 @@ function App(): React.JSX.Element {
 
   const handleRename = useCallback(async () => {
     if (mode !== 'ai') return;
-    if (isRenaming || batchAI.status === 'processing' || files.length === 0 || !instruction.trim()) {
+    if (
+      isRenaming ||
+      batchAI.status === 'processing' ||
+      files.length === 0 ||
+      !instruction.trim()
+    ) {
       return;
     }
 
@@ -518,7 +530,8 @@ function App(): React.JSX.Element {
     <div
       className={cn(
         'flex h-screen w-screen flex-col bg-white dark:bg-zinc-950 transition-colors',
-        isDragging && 'bg-blue-50/50 dark:bg-blue-950/20'
+        isDragging && targetMode === 'folder' && 'bg-amber-50/50 dark:bg-amber-950/20',
+        isDragging && targetMode === 'file' && 'bg-blue-50/50 dark:bg-blue-950/20'
       )}
       onDrop={rootProps.onDrop}
       onDragOver={rootProps.onDragOver}
@@ -583,7 +596,7 @@ function App(): React.JSX.Element {
       )}
 
       {/* 拖放覆盖层 */}
-      {isDragging && <FileDropOverlay />}
+      {isDragging && <FileDropOverlay targetMode={targetMode} />}
 
       {/* 表头 */}
       <AppHeader
@@ -591,6 +604,7 @@ function App(): React.JSX.Element {
         isEmpty={isEmpty}
         isRenaming={isRenaming || batchAI.status === 'processing'}
         hasChanges={hasChanges}
+        targetMode={targetMode}
         resolvedTheme={resolvedTheme}
         onToggleTheme={toggleTheme}
         onOpenSettings={() => {
@@ -598,11 +612,12 @@ function App(): React.JSX.Element {
           void openSettings();
         }}
         onClear={clearFiles}
+        onTargetModeChange={setTargetMode}
       />
 
       {/* 文件列表 */}
       {isEmpty ? (
-        <EmptyState />
+        <EmptyState targetMode={targetMode} />
       ) : (
         <>
           {files.length > PAGINATION_THRESHOLD && (
@@ -619,22 +634,25 @@ function App(): React.JSX.Element {
             />
           )}
 
-          <ScrollArea key={`${clampedPageIndex}:${pageSize}:${files.length}`} className="flex-1 min-h-0">
-          <FileList
-            files={pageFiles}
-            indexOffset={pageStart}
-            totalFilesLength={files.length}
-            highlightedIds={highlightedIds}
-            editingIndex={editingIndex}
-            setEditingIndex={setEditingIndexWithPaging}
-            onRename={updateFileName}
-            onRevert={revertFileName}
-            onRemove={removeFile}
-            reorderFiles={reorderFiles}
-            onAfterReorder={handleAfterReorder}
-            isLoading={isRenaming}
-            isDisabled={isRenaming || isApplying || isUndoing || batchAI.status === 'processing'}
-          />
+          <ScrollArea
+            key={`${clampedPageIndex}:${pageSize}:${files.length}`}
+            className="flex-1 min-h-0"
+          >
+            <FileList
+              files={pageFiles}
+              indexOffset={pageStart}
+              totalFilesLength={files.length}
+              highlightedIds={highlightedIds}
+              editingIndex={editingIndex}
+              setEditingIndex={setEditingIndexWithPaging}
+              onRename={updateFileName}
+              onRevert={revertFileName}
+              onRemove={removeFile}
+              reorderFiles={reorderFiles}
+              onAfterReorder={handleAfterReorder}
+              isLoading={isRenaming}
+              isDisabled={isRenaming || isApplying || isUndoing || batchAI.status === 'processing'}
+            />
           </ScrollArea>
         </>
       )}

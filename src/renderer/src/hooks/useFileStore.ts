@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react';
-import type { FileItem } from '@/types/file';
+import type { FileItem, TargetMode } from '@/types/file';
 import { generateNewNames, type AIServiceConfig } from '@/lib/ai-service';
 import { ensureExtension } from '@/lib/filename';
 import { electronApi } from '@/lib/electron-api';
 import {
   extractFilePathsFromDataTransfer,
   getElectronFilePath,
-  isAbsolutePathLike,
-  toFileItemsFromDataTransferFiles
+  isAbsolutePathLike
 } from '@/lib/file-drop';
 import { getDedupeKey } from '@/lib/file-dedupe';
 import type { RenameError, RenameFileItem, RenameResult, RenamedItem } from '@shared/ipc-types';
@@ -24,11 +23,13 @@ export type HistoryItem = {
 export type UseFileStoreResult = {
   files: FileItem[];
   highlightedIds: Set<string>;
+  targetMode: TargetMode;
   isRenaming: boolean;
   isApplying: boolean;
   isUndoing: boolean;
   hasChanges: boolean;
   canUndo: boolean;
+  setTargetMode: (mode: TargetMode) => void;
   addFiles: (newFiles: FileItem[]) => void;
   reorderFiles: (oldIndex: number, newIndex: number) => void;
   removeFile: (id: string) => void;
@@ -60,6 +61,7 @@ function arrayMove<T>(items: T[], oldIndex: number, newIndex: number): T[] {
 export function useFileStore(): UseFileStoreResult {
   const [files, setFiles] = useState<FileItem[]>([]);
   const [highlightedIds, setHighlightedIds] = useState<Set<string>>(new Set());
+  const [targetMode, setTargetModeRaw] = useState<TargetMode>('file');
   const [isRenaming, setIsRenaming] = useState(false);
   const [isApplying, setIsApplying] = useState(false);
   const [isUndoing, setIsUndoing] = useState(false);
@@ -192,6 +194,12 @@ export function useFileStore(): UseFileStoreResult {
     );
   }, []);
 
+  // 切换目标模式时自动清空列表
+  const setTargetMode = useCallback((mode: TargetMode) => {
+    setTargetModeRaw(mode);
+    setFiles([]);
+  }, []);
+
   const handleDrop = useCallback(
     (e: DragEvent<HTMLDivElement>) => {
       e.preventDefault();
@@ -202,11 +210,83 @@ export function useFileStore(): UseFileStoreResult {
       const needsFallback = rawPaths.some((p) => !isAbsolutePathLike(p));
       const fallbackPaths = needsFallback ? extractFilePathsFromDataTransfer(e.dataTransfer) : [];
 
-      const newFiles: FileItem[] = toFileItemsFromDataTransferFiles(droppedFiles, fallbackPaths);
+      if (targetMode === 'folder') {
+        // 文件夹模式：仅保留文件夹，忽略文件
+        // DataTransfer 中的文件夹有特征：size === 0 且无扩展名（但不完全可靠）
+        // 更可靠的方法是通过 Electron 获取路径后在 main 进程判断
+        // 这里用简单方式：通过 webkitGetAsEntry 判断
+        const items = e.dataTransfer.items;
+        const folderFiles: FileItem[] = [];
 
-      addFiles(newFiles);
+        for (let i = 0; i < items.length; i++) {
+          const entry = items[i].webkitGetAsEntry?.();
+          if (entry?.isDirectory) {
+            const file = droppedFiles[i];
+            const rawPath = rawPaths[i] || '';
+            const pathFromUri = fallbackPaths[i] || '';
+            const finalPath = isAbsolutePathLike(rawPath) ? rawPath : pathFromUri;
+
+            folderFiles.push({
+              id: `${file.name}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+              original: file.name,
+              renamed: file.name,
+              path: finalPath || file.name
+            });
+          }
+        }
+
+        addFiles(folderFiles);
+      } else {
+        // 文件模式：文件直接保留，文件夹递归扫描
+        const items = e.dataTransfer.items;
+        const directFiles: FileItem[] = [];
+        const folderPaths: string[] = [];
+
+        for (let i = 0; i < items.length; i++) {
+          const entry = items[i].webkitGetAsEntry?.();
+          const file = droppedFiles[i];
+          const rawPath = rawPaths[i] || '';
+          const pathFromUri = fallbackPaths[i] || '';
+          const finalPath = isAbsolutePathLike(rawPath) ? rawPath : pathFromUri;
+
+          if (entry?.isDirectory) {
+            // 文件夹 → 收集路径待扫描
+            if (isAbsolutePathLike(finalPath)) {
+              folderPaths.push(finalPath);
+            }
+          } else {
+            // 普通文件 → 直接加入
+            directFiles.push({
+              id: `${file.name}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+              original: file.name,
+              renamed: file.name,
+              path: finalPath || file.name
+            });
+          }
+        }
+
+        // 先添加直接拖入的文件
+        if (directFiles.length > 0) {
+          addFiles(directFiles);
+        }
+
+        // 异步扫描文件夹并添加
+        if (folderPaths.length > 0) {
+          electronApi.scanDirectory(folderPaths).then((result) => {
+            const scannedFiles: FileItem[] = result.files.map((f) => ({
+              id: `${f.name}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+              original: f.name,
+              renamed: f.name,
+              path: f.path
+            }));
+            if (scannedFiles.length > 0) {
+              addFiles(scannedFiles);
+            }
+          });
+        }
+      }
     },
-    [addFiles]
+    [addFiles, targetMode]
   );
 
   const stopRenaming = useCallback(() => {
@@ -418,11 +498,13 @@ export function useFileStore(): UseFileStoreResult {
   return {
     files,
     highlightedIds,
+    targetMode,
     isRenaming,
     isApplying,
     isUndoing,
     hasChanges,
     canUndo,
+    setTargetMode,
     addFiles,
     reorderFiles,
     removeFile,
