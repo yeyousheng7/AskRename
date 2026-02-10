@@ -62,7 +62,7 @@ const PROVIDER_PRESETS: Record<AIProvider, Omit<AIServiceConfig, 'apiKey'>> = {
 // System Prompt（包含 JSON 示例，兼容 DeepSeek JSON Output 要求）
 // ============================================================================
 
-const SYSTEM_PROMPT = `你是一个文件名批处理助手。用户会提供文件列表和修改指令。
+export const AI_SYSTEM_PROMPT = `你是一个文件名批处理助手。用户会提供文件列表和修改指令。
 
 你必须返回一个纯 JSON 字符串数组，包含修改后的文件名。数组长度必须与输入文件严格一致。
 
@@ -159,7 +159,7 @@ export async function generateNewNames(
 修改指令：${userInstruction}`;
 
   const messages: ChatMessage[] = [
-    { role: 'system', content: SYSTEM_PROMPT },
+    { role: 'system', content: AI_SYSTEM_PROMPT },
     { role: 'user', content: userMessage }
   ];
 

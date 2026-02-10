@@ -38,6 +38,7 @@ type StoredSecretsV1 = {
 };
 
 const volatileApiKeys = new Map<AIProvider, string>();
+const aiRequestControllers = new Map<string, AbortController>();
 
 function isAIProvider(value: unknown): value is AIProvider {
   return value === 'openai' || value === 'deepseek' || value === 'ollama' || value === 'custom';
@@ -155,9 +156,17 @@ async function makeUniqueTempPath(dir: string, ext: string, hint: string): Promi
 }
 
 export function registerAIHandlers(): void {
+  ipcMain.handle('ai:cancel', async (_event, requestId: string): Promise<void> => {
+    const controller = aiRequestControllers.get(requestId);
+    if (controller) {
+      controller.abort();
+      aiRequestControllers.delete(requestId);
+    }
+  });
+
   // AI Chat Handler
   ipcMain.handle('ai:chat', async (_event, request: AIChatRequest): Promise<AIChatResponse> => {
-    const { settings, messages } = request;
+    const { settings, messages, requestId } = request;
     const { provider, apiKey, baseURL, model, maxTokens } = settings;
 
     // 参数验证
@@ -181,6 +190,11 @@ export function registerAIHandlers(): void {
       max_tokens: maxTokens
     };
 
+    const abortController = new AbortController();
+    if (requestId) {
+      aiRequestControllers.set(requestId, abortController);
+    }
+
     try {
       // 使用 Node.js fetch（Electron 18+ 内置）
       const headers: Record<string, string> = {
@@ -193,6 +207,7 @@ export function registerAIHandlers(): void {
       const response = await fetch(`${baseURL}/chat/completions`, {
         method: 'POST',
         headers,
+        signal: abortController.signal,
         body: JSON.stringify(requestBody)
       });
 
@@ -216,8 +231,15 @@ export function registerAIHandlers(): void {
 
       return { success: true, content };
     } catch (error) {
+      if (abortController.signal.aborted) {
+        return { success: false, error: '请求已取消' };
+      }
       const message = error instanceof Error ? error.message : '未知错误';
       return { success: false, error: `请求失败: ${message}` };
+    } finally {
+      if (requestId) {
+        aiRequestControllers.delete(requestId);
+      }
     }
   });
 

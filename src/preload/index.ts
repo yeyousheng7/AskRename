@@ -42,10 +42,19 @@ const api = {
    * 调用 AI Chat API
    * @param settings - AI 服务配置
    * @param messages - 聊天消息数组
+   * @param requestId - 可选：用于取消指定请求（批处理/并发场景）
    * @returns AI 响应结果
    */
-  askAI: (settings: AIChatSettings, messages: ChatMessage[]): Promise<AIChatResponse> => {
-    return ipcRenderer.invoke('ai:chat', { settings, messages });
+  askAI: (
+    settings: AIChatSettings,
+    messages: ChatMessage[],
+    requestId?: string
+  ): Promise<AIChatResponse> => {
+    return ipcRenderer.invoke('ai:chat', { settings, messages, requestId });
+  },
+
+  cancelAI: (requestId: string): Promise<void> => {
+    return ipcRenderer.invoke('ai:cancel', requestId);
   },
 
   /**

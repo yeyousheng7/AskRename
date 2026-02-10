@@ -19,8 +19,16 @@ export const electronApi = {
     return getApi().getPathForFile(file);
   },
 
-  askAI(settings: AIChatSettings, messages: ChatMessage[]): Promise<AIChatResponse> {
-    return getApi().askAI(settings, messages);
+  askAI(
+    settings: AIChatSettings,
+    messages: ChatMessage[],
+    requestId?: string
+  ): Promise<AIChatResponse> {
+    return getApi().askAI(settings, messages, requestId);
+  },
+
+  cancelAI(requestId: string): Promise<void> {
+    return getApi().cancelAI(requestId);
   },
 
   applyRename(files: RenameFileItem[]): Promise<RenameResult> {

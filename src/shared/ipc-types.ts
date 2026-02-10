@@ -19,6 +19,10 @@ export interface AIChatSettings {
 export interface AIChatRequest {
   settings: AIChatSettings;
   messages: ChatMessage[];
+  /**
+   * 可选：用于取消指定请求（批处理/并发场景）。
+   */
+  requestId?: string;
 }
 
 export interface AIChatResponse {
