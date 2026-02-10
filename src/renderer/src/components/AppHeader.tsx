@@ -1,4 +1,5 @@
 import { LoaderIcon, MoonIcon, SettingsIcon, SunIcon } from 'lucide-react';
+import { ClearAllButton } from '@/components/ClearAllButton';
 
 export function AppHeader({
   filesLength,
@@ -7,7 +8,8 @@ export function AppHeader({
   hasChanges,
   resolvedTheme,
   onToggleTheme,
-  onOpenSettings
+  onOpenSettings,
+  onClear
 }: {
   filesLength: number;
   isEmpty: boolean;
@@ -16,6 +18,7 @@ export function AppHeader({
   resolvedTheme: 'light' | 'dark';
   onToggleTheme: () => void;
   onOpenSettings: () => void;
+  onClear: () => void;
 }): React.JSX.Element {
   return (
     <div className="flex-shrink-0 grid grid-cols-[3rem_1fr_3rem_1fr_auto] border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900">
@@ -25,9 +28,12 @@ export function AppHeader({
           原始文本
         </span>
         {!isEmpty && (
-          <span className="ml-2 font-mono text-xs text-zinc-400 dark:text-zinc-500">
-            ({filesLength})
-          </span>
+          <>
+            <span className="ml-2 font-mono text-xs text-zinc-400 dark:text-zinc-500">
+              ({filesLength})
+            </span>
+            <ClearAllButton onClear={onClear} />
+          </>
         )}
       </div>
       <div className="h-8 border-r border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-800" />

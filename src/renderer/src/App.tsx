@@ -69,6 +69,7 @@ function App(): React.JSX.Element {
     reorderFiles,
     updateFileName,
     batchUpdateFileNames,
+    clearFiles,
     discardChanges,
     revertFileName,
     handleDrop,
@@ -125,18 +126,14 @@ function App(): React.JSX.Element {
     if (aiSession === 'review' && pendingDecision?.type === 'regex') {
       if (!hasMagicIndexVars(pendingDecision.replace)) return;
       const originals = files.map((f) => f.original);
-      const newNames = batchApplyMagicRegex(originals, pendingDecision.find, pendingDecision.replace);
+      const newNames = batchApplyMagicRegex(
+        originals,
+        pendingDecision.find,
+        pendingDecision.replace
+      );
       batchUpdateFileNames(newNames);
     }
-  }, [
-    files,
-    mode,
-    replacePattern,
-    findPattern,
-    batchUpdateFileNames,
-    aiSession,
-    pendingDecision
-  ]);
+  }, [files, mode, replacePattern, findPattern, batchUpdateFileNames, aiSession, pendingDecision]);
 
   useEffect(() => {
     if (reorderNonce === 0) return;
@@ -464,6 +461,7 @@ function App(): React.JSX.Element {
           setSettingsForcedTab(null);
           void openSettings();
         }}
+        onClear={clearFiles}
       />
 
       {/* 文件列表 */}
