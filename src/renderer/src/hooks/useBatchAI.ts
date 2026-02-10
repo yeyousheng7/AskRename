@@ -365,6 +365,7 @@ export function useBatchAI(): UseBatchAIResult {
     (batchIndex: number) => {
       if (statusRef.current !== 'error' && statusRef.current !== 'paused') return;
       if (batchIndex < 0 || batchIndex >= batchesRef.current.length) return;
+      if (!startParamsRef.current) return;
 
       const current = batchesRef.current;
       const batch = current[batchIndex];
@@ -380,6 +381,9 @@ export function useBatchAI(): UseBatchAIResult {
       };
       setBatchesAndRefs(next);
       haltSchedulingRef.current = false;
+      if (!abortControllerRef.current || abortControllerRef.current.signal.aborted) {
+        abortControllerRef.current = new AbortController();
+      }
       setStatus('processing');
     },
     [setBatchesAndRefs]
@@ -387,6 +391,7 @@ export function useBatchAI(): UseBatchAIResult {
 
   const retryFailed = useCallback(() => {
     if (statusRef.current !== 'error' && statusRef.current !== 'paused') return;
+    if (!startParamsRef.current) return;
 
     const current = batchesRef.current;
     const next = current.map((b) =>
@@ -402,6 +407,9 @@ export function useBatchAI(): UseBatchAIResult {
     );
     setBatchesAndRefs(next);
     haltSchedulingRef.current = false;
+    if (!abortControllerRef.current || abortControllerRef.current.signal.aborted) {
+      abortControllerRef.current = new AbortController();
+    }
     setStatus('processing');
   }, [setBatchesAndRefs]);
 

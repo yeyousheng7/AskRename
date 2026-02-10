@@ -4,6 +4,8 @@ import { useFileStore } from '@/hooks/useFileStore';
 import { useTheme } from '@/hooks/useTheme';
 import { useSettings } from '@/hooks/useSettings';
 import FileList from '@/components/FileList';
+import { ProgressOverlay } from '@/components/ProgressOverlay';
+import { SmartWarningDialog } from '@/components/SmartWarningDialog';
 import { SettingsDialog } from '@/components/SettingsDialog';
 import { Toast } from '@/components/Toast';
 import { FileDropOverlay } from '@/components/FileDropOverlay';
@@ -14,8 +16,9 @@ import { useToast } from '@/hooks/useToast';
 import { useSessionHistory } from '@/hooks/useSessionHistory';
 import { useFileDragOverlay } from '@/hooks/useFileDragOverlay';
 import { useEvent } from '@/hooks/useEvent';
+import { useBatchAI } from '@/hooks/useBatchAI';
 import { electronApi } from '@/lib/electron-api';
-import { generateAutoDecision } from '@/lib/ai-service';
+import { generateAutoDecision, getConfigFromEnv } from '@/lib/ai-service';
 import { batchApplyMagicRegex } from '@/lib/magic-regex';
 import { cn } from '@/lib/utils';
 import type { AISessionState, PendingDecision } from '@/types/ai';
@@ -56,6 +59,7 @@ function App(): React.JSX.Element {
   const { settings, updateSettings } = useSettings();
   const { toast, showToast, dismissToast } = useToast();
   const { history, addToHistory } = useSessionHistory();
+  const batchAI = useBatchAI();
 
   const {
     files,
@@ -83,7 +87,7 @@ function App(): React.JSX.Element {
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
 
   // 是否处于审查模式（有待应用的更改）
-  const isReviewMode = hasChanges && !isRenaming;
+  const isReviewMode = hasChanges && !isRenaming && batchAI.status === 'idle';
 
   const filesRef = useRef(files);
   useEffect(() => {
@@ -201,9 +205,15 @@ function App(): React.JSX.Element {
   }, [isUndoing, undo, showToast]);
   const handleUndoEvent = useEvent(handleUndo);
 
+  const [isLargeAiWarningOpen, setIsLargeAiWarningOpen] = useState(false);
+  const pendingAiContinueRef = useRef<(() => void) | null>(null);
+
   // AI 生成处理
-  const handleRename = useCallback(async () => {
-    if (isRenaming || files.length === 0 || !instruction.trim()) return;
+  const doRename = useCallback(async () => {
+    if (mode !== 'ai') return;
+    if (isRenaming || batchAI.status === 'processing' || files.length === 0 || !instruction.trim()) {
+      return;
+    }
 
     let apiKeyToUse = settings.apiKey.trim();
     if (settings.provider !== 'ollama' && !apiKeyToUse) {
@@ -224,31 +234,81 @@ function App(): React.JSX.Element {
     setError(null);
     addToHistory(instruction);
     try {
-      await startRenaming(instruction, {
-        provider: settings.provider,
-        apiKey: apiKeyToUse,
-        baseURL: settings.baseUrl,
-        model: settings.model
-      });
+      if (files.length > 20) {
+        const envCfg = getConfigFromEnv();
+        const baseURL = settings.baseUrl.trim();
+        const model = settings.model.trim();
+        if (!baseURL) throw new Error('API Base URL 未配置');
+        if (!model) throw new Error('模型名称未配置');
+
+        batchAI.start({
+          items: files.map((f) => ({ id: f.id, original: f.original })),
+          instruction,
+          settings: {
+            provider: settings.provider,
+            apiKey: apiKeyToUse,
+            baseURL,
+            model,
+            jsonMode: envCfg.jsonMode,
+            maxTokens: envCfg.maxTokens
+          },
+          onBatchApplied: ({ items, resultNames }) => {
+            items.forEach((it, i) => updateFileName(it.id, resultNames[i] || ''));
+          }
+        });
+      } else {
+        await startRenaming(instruction, {
+          provider: settings.provider,
+          apiKey: apiKeyToUse,
+          baseURL: settings.baseUrl,
+          model: settings.model
+        });
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : '重命名失败，请重试';
       setError(message);
       console.error('重命名失败:', err);
     }
   }, [
+    mode,
     instruction,
     isRenaming,
+    batchAI,
     files.length,
+    files,
     promptConfigureApiKey,
     settings,
     startRenaming,
     updateSettings,
-    addToHistory
+    addToHistory,
+    updateFileName
   ]);
+
+  const handleRename = useCallback(async () => {
+    if (mode !== 'ai') return;
+    if (isRenaming || batchAI.status === 'processing' || files.length === 0 || !instruction.trim()) {
+      return;
+    }
+
+    if (files.length > 50) {
+      pendingAiContinueRef.current = () => void doRename();
+      setIsLargeAiWarningOpen(true);
+      return;
+    }
+
+    await doRename();
+  }, [mode, isRenaming, batchAI.status, files.length, instruction, doRename]);
 
   // Auto 模式：AI 决策引擎
   const handleAutoRename = useCallback(async () => {
-    if (aiSession === 'loading' || files.length === 0 || !instruction.trim()) return;
+    if (
+      aiSession === 'loading' ||
+      batchAI.status === 'processing' ||
+      files.length === 0 ||
+      !instruction.trim()
+    ) {
+      return;
+    }
 
     // 获取 API Key
     let apiKeyToUse = settings.apiKey.trim();
@@ -295,13 +355,29 @@ function App(): React.JSX.Element {
       } else {
         // AI 返回文件名列表
         if (files.length > 20) {
-          // 文件超过样本数，需要完整 AI 处理（回退到 startRenaming）
+          // 文件超过样本数，需要完整 AI 处理（使用批处理）
           setAISession('idle');
-          await startRenaming(instruction, {
-            provider: settings.provider,
-            apiKey: apiKeyToUse,
-            baseURL: settings.baseUrl,
-            model: settings.model
+
+          const envCfg = getConfigFromEnv();
+          const baseURL = settings.baseUrl.trim();
+          const model = settings.model.trim();
+          if (!baseURL) throw new Error('API Base URL 未配置');
+          if (!model) throw new Error('模型名称未配置');
+
+          batchAI.start({
+            items: files.map((f) => ({ id: f.id, original: f.original })),
+            instruction,
+            settings: {
+              provider: settings.provider,
+              apiKey: apiKeyToUse,
+              baseURL,
+              model,
+              jsonMode: envCfg.jsonMode,
+              maxTokens: envCfg.maxTokens
+            },
+            onBatchApplied: ({ items, resultNames }) => {
+              items.forEach((it, i) => updateFileName(it.id, resultNames[i] || ''));
+            }
           });
         } else {
           // 文件数在样本范围内，直接使用返回结果
@@ -319,13 +395,14 @@ function App(): React.JSX.Element {
   }, [
     instruction,
     aiSession,
+    batchAI,
     files,
     promptConfigureApiKey,
     settings,
     updateSettings,
-    startRenaming,
     batchUpdateFileNames,
-    addToHistory
+    addToHistory,
+    updateFileName
   ]);
 
   // 放弃 AI 决策
@@ -432,6 +509,39 @@ function App(): React.JSX.Element {
         />
       )}
 
+      <SmartWarningDialog
+        open={isLargeAiWarningOpen}
+        onClose={() => {
+          pendingAiContinueRef.current = null;
+          setIsLargeAiWarningOpen(false);
+        }}
+        onContinue={() => {
+          const fn = pendingAiContinueRef.current;
+          pendingAiContinueRef.current = null;
+          setIsLargeAiWarningOpen(false);
+          fn?.();
+        }}
+        onSwitchMode={handleModeChange}
+      />
+
+      <ProgressOverlay
+        open={batchAI.status === 'processing' || batchAI.status === 'error'}
+        status={batchAI.status}
+        completedFiles={batchAI.completedFiles}
+        totalFiles={batchAI.totalFiles}
+        progressPercent={batchAI.progressPercent}
+        batches={batchAI.batches}
+        errorSummary={batchAI.errorSummary}
+        onCancel={() => {
+          batchAI.cancel();
+          if (batchAI.status === 'processing') {
+            showToast('已取消任务', 'success');
+          }
+        }}
+        onRetryFailed={batchAI.retryFailed}
+        onRetryBatch={batchAI.retryBatch}
+      />
+
       {isSettingsOpen && (
         <SettingsDialog
           open
@@ -453,7 +563,7 @@ function App(): React.JSX.Element {
       <AppHeader
         filesLength={files.length}
         isEmpty={isEmpty}
-        isRenaming={isRenaming}
+        isRenaming={isRenaming || batchAI.status === 'processing'}
         hasChanges={hasChanges}
         resolvedTheme={resolvedTheme}
         onToggleTheme={toggleTheme}
@@ -480,7 +590,7 @@ function App(): React.JSX.Element {
             reorderFiles={reorderFiles}
             onAfterReorder={handleAfterReorder}
             isLoading={isRenaming}
-            isDisabled={isRenaming || isApplying || isUndoing}
+            isDisabled={isRenaming || isApplying || isUndoing || batchAI.status === 'processing'}
           />
         </ScrollArea>
       )}
@@ -495,7 +605,7 @@ function App(): React.JSX.Element {
         inputRef={inputRef}
         isEmpty={isEmpty}
         isReviewMode={isReviewMode}
-        isRenaming={isRenaming}
+        isRenaming={isRenaming || batchAI.status === 'processing'}
         isApplying={isApplying}
         isUndoing={isUndoing}
         canUndo={canUndo}
@@ -510,7 +620,14 @@ function App(): React.JSX.Element {
         onUndo={() => void handleUndoEvent()}
         onDiscard={handleDiscard}
         onApply={() => void handleApply()}
-        onStop={stopRenaming}
+        onStop={() => {
+          if (batchAI.status === 'processing') {
+            batchAI.cancel();
+            showToast('已取消任务', 'success');
+            return;
+          }
+          stopRenaming();
+        }}
         onGenerate={() => void (mode === 'auto' ? handleAutoRename() : handleRename())}
         showToast={showToast}
         history={history}
