@@ -3,7 +3,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { useFileStore } from '@/hooks/useFileStore';
 import { useTheme } from '@/hooks/useTheme';
 import { useSettings } from '@/hooks/useSettings';
-import EditorRow from '@/components/EditorRow';
+import FileList from '@/components/FileList';
 import { SettingsDialog } from '@/components/SettingsDialog';
 import { Toast } from '@/components/Toast';
 import { FileDropOverlay } from '@/components/FileDropOverlay';
@@ -25,6 +25,10 @@ import type { SettingsTabId } from '@/types/settings';
 // ============================================================================
 // App 主组件
 // ============================================================================
+
+function hasMagicIndexVars(text: string): boolean {
+  return /\$\{i(?:0|00|000)?\}/.test(text);
+}
 
 function App(): React.JSX.Element {
   // 模式状态：auto(智能) | ai(纯AI) | regex(纯正则)
@@ -62,6 +66,7 @@ function App(): React.JSX.Element {
     hasChanges,
     canUndo,
     removeFile,
+    reorderFiles,
     updateFileName,
     batchUpdateFileNames,
     discardChanges,
@@ -83,7 +88,10 @@ function App(): React.JSX.Element {
   useEffect(() => {
     filesRef.current = files;
   }, [files]);
-  const originalNamesKey = files.map((f) => f.original).join('\u0000');
+  const stableOriginalNamesKey = files
+    .map((f) => `${f.id}:${f.original}`)
+    .sort()
+    .join('\u0000');
 
   // 正则实时预览引擎（支持魔法变量）
   useEffect(() => {
@@ -96,7 +104,44 @@ function App(): React.JSX.Element {
     const newNames = batchApplyMagicRegex(filenames, findPattern, replacePattern);
 
     batchUpdateFileNames(newNames);
-  }, [mode, findPattern, replacePattern, originalNamesKey, batchUpdateFileNames]);
+  }, [mode, findPattern, replacePattern, stableOriginalNamesKey, batchUpdateFileNames]);
+
+  const [reorderNonce, setReorderNonce] = useState(0);
+  const handleAfterReorder = useCallback(() => {
+    setReorderNonce((prev) => prev + 1);
+  }, []);
+
+  const recomputeIfMagicEnabledAfterReorder = useCallback(() => {
+    if (files.length === 0) return;
+
+    if (mode === 'regex') {
+      if (!hasMagicIndexVars(replacePattern)) return;
+      const originals = files.map((f) => f.original);
+      const newNames = batchApplyMagicRegex(originals, findPattern, replacePattern);
+      batchUpdateFileNames(newNames);
+      return;
+    }
+
+    if (aiSession === 'review' && pendingDecision?.type === 'regex') {
+      if (!hasMagicIndexVars(pendingDecision.replace)) return;
+      const originals = files.map((f) => f.original);
+      const newNames = batchApplyMagicRegex(originals, pendingDecision.find, pendingDecision.replace);
+      batchUpdateFileNames(newNames);
+    }
+  }, [
+    files,
+    mode,
+    replacePattern,
+    findPattern,
+    batchUpdateFileNames,
+    aiSession,
+    pendingDecision
+  ]);
+
+  useEffect(() => {
+    if (reorderNonce === 0) return;
+    recomputeIfMagicEnabledAfterReorder();
+  }, [reorderNonce, recomputeIfMagicEnabledAfterReorder]);
 
   // 模式切换处理
   const handleModeChange = useCallback(
@@ -426,23 +471,19 @@ function App(): React.JSX.Element {
         <EmptyState />
       ) : (
         <ScrollArea className="flex-1">
-          <div className="min-h-full pb-32">
-            {files.map((file, index) => (
-              <EditorRow
-                key={file.id}
-                file={file}
-                index={index}
-                filesLength={files.length}
-                editingIndex={editingIndex}
-                setEditingIndex={setEditingIndex}
-                onRename={updateFileName}
-                onRevert={revertFileName}
-                onRemove={removeFile}
-                isLoading={isRenaming}
-                isHighlighted={highlightedIds.has(file.id)}
-              />
-            ))}
-          </div>
+          <FileList
+            files={files}
+            highlightedIds={highlightedIds}
+            editingIndex={editingIndex}
+            setEditingIndex={setEditingIndex}
+            onRename={updateFileName}
+            onRevert={revertFileName}
+            onRemove={removeFile}
+            reorderFiles={reorderFiles}
+            onAfterReorder={handleAfterReorder}
+            isLoading={isRenaming}
+            isDisabled={isRenaming || isApplying || isUndoing}
+          />
         </ScrollArea>
       )}
 

@@ -30,6 +30,7 @@ export type UseFileStoreResult = {
   hasChanges: boolean;
   canUndo: boolean;
   addFiles: (newFiles: FileItem[]) => void;
+  reorderFiles: (oldIndex: number, newIndex: number) => void;
   removeFile: (id: string) => void;
   updateFileName: (id: string, newName: string) => void;
   batchUpdateFileNames: (newNames: string[]) => void;
@@ -48,6 +49,13 @@ export type UseFileStoreResult = {
   resetAfterApply: (renamed?: RenamedItem[]) => void;
   undo: () => Promise<{ success: boolean; error?: string }>;
 };
+
+function arrayMove<T>(items: T[], oldIndex: number, newIndex: number): T[] {
+  const next = items.slice();
+  const [moved] = next.splice(oldIndex, 1);
+  next.splice(newIndex, 0, moved);
+  return next;
+}
 
 export function useFileStore(): UseFileStoreResult {
   const [files, setFiles] = useState<FileItem[]>([]);
@@ -123,6 +131,16 @@ export function useFileStore(): UseFileStoreResult {
         highlightTimerRef.current = null;
       }, 1500);
     }
+  }, []);
+
+  const reorderFiles = useCallback((oldIndex: number, newIndex: number) => {
+    if (oldIndex === newIndex) return;
+
+    setFiles((prev) => {
+      if (oldIndex < 0 || newIndex < 0) return prev;
+      if (oldIndex >= prev.length || newIndex >= prev.length) return prev;
+      return arrayMove(prev, oldIndex, newIndex);
+    });
   }, []);
 
   const updateFileName = useCallback((id: string, newName: string) => {
@@ -406,6 +424,7 @@ export function useFileStore(): UseFileStoreResult {
     hasChanges,
     canUndo,
     addFiles,
+    reorderFiles,
     removeFile,
     updateFileName,
     batchUpdateFileNames,
