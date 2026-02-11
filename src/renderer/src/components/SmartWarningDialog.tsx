@@ -68,7 +68,6 @@ export function SmartWarningDialog({
               </Button>
               <Button
                 onClick={() => {
-                  onClose();
                   onContinue();
                 }}
               >

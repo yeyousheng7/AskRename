@@ -218,13 +218,15 @@ function App(): React.JSX.Element {
   const pendingAiContinueRef = useRef<(() => void) | null>(null);
 
   // AI 生成处理
-  const doRename = useCallback(async () => {
-    if (mode !== 'ai') return;
+  const doRename = useCallback(
+    async (instructionText: string) => {
+      const trimmedInstruction = instructionText.trim();
+      if (mode !== 'ai') return;
     if (
       isRenaming ||
       batchAI.status === 'processing' ||
       files.length === 0 ||
-      !instruction.trim()
+        !trimmedInstruction
     ) {
       return;
     }
@@ -246,7 +248,7 @@ function App(): React.JSX.Element {
     }
 
     setError(null);
-    addToHistory(instruction);
+      addToHistory(trimmedInstruction);
     try {
       if (files.length > 20) {
         const envCfg = getConfigFromEnv();
@@ -257,7 +259,7 @@ function App(): React.JSX.Element {
 
         batchAI.start({
           items: files.map((f) => ({ id: f.id, original: f.original })),
-          instruction,
+            instruction: trimmedInstruction,
           settings: {
             provider: settings.provider,
             apiKey: apiKeyToUse,
@@ -271,7 +273,7 @@ function App(): React.JSX.Element {
           }
         });
       } else {
-        await startRenaming(instruction, {
+          await startRenaming(trimmedInstruction, {
           provider: settings.provider,
           apiKey: apiKeyToUse,
           baseURL: settings.baseUrl,
@@ -283,19 +285,20 @@ function App(): React.JSX.Element {
       setError(message);
       console.error('重命名失败:', err);
     }
-  }, [
-    mode,
-    instruction,
-    isRenaming,
-    batchAI,
-    files,
-    promptConfigureApiKey,
-    settings,
-    startRenaming,
-    updateSettings,
-    addToHistory,
-    updateFileName
-  ]);
+    },
+    [
+      mode,
+      isRenaming,
+      batchAI,
+      files,
+      promptConfigureApiKey,
+      settings,
+      startRenaming,
+      updateSettings,
+      addToHistory,
+      updateFileName
+    ]
+  );
 
   const handleRename = useCallback(async () => {
     if (mode !== 'ai') return;
@@ -309,12 +312,13 @@ function App(): React.JSX.Element {
     }
 
     if (files.length > 50) {
-      pendingAiContinueRef.current = () => void doRename();
+      const snapshot = instruction;
+      pendingAiContinueRef.current = () => void doRename(snapshot);
       setIsLargeAiWarningOpen(true);
       return;
     }
 
-    await doRename();
+    await doRename(instruction);
   }, [mode, isRenaming, batchAI.status, files.length, instruction, doRename]);
 
   // Auto 模式：AI 决策引擎
@@ -595,6 +599,7 @@ function App(): React.JSX.Element {
           const fn = pendingAiContinueRef.current;
           pendingAiContinueRef.current = null;
           setIsLargeAiWarningOpen(false);
+          setInstruction('');
           fn?.();
         }}
         onSwitchMode={handleModeChange}

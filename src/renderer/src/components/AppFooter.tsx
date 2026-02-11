@@ -275,7 +275,7 @@ export function AppFooter({
                       <input
                         ref={aiAssistInputRef}
                         type="text"
-                        placeholder="\u2728 请描述您的正则需求 (例如: 删除所有括号内的内容)..."
+                        placeholder="请描述您的正则需求 (例如: 删除所有括号内的内容)..."
                         value={aiAssistText}
                         onChange={(e) => setAiAssistText(e.target.value)}
                         onKeyDown={(e) => {
