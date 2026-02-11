@@ -97,7 +97,7 @@ export function AppFooter({
 
     const requirement = aiAssistText.trim();
     if (!requirement) {
-      showToast('Please describe your regex requirement first.', 'error');
+      showToast('请先描述你的正则表达式需求', 'error');
       return;
     }
 

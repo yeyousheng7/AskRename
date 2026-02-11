@@ -15,7 +15,8 @@ import type {
   RenamedItem,
   RenameResult,
   ScannedFileItem,
-  ScanDirectoryResult
+  ScanDirectoryResult,
+  ScanDirectoryShallowResult
 } from '@shared/ipc-types';
 
 // ============================================================================
@@ -483,6 +484,39 @@ export function registerAIHandlers(): void {
       }
 
       return { files, errors };
+    }
+  );
+
+  // 目录浅扫描 Handler（仅扫描当前层 + 探测子文件夹）
+  ipcMain.handle(
+    'app:scan-directory-shallow',
+    async (_event, dirs: string[]): Promise<ScanDirectoryShallowResult> => {
+      const files: ScannedFileItem[] = [];
+      const errors: string[] = [];
+      let hasSubdirectories = false;
+
+      for (const dir of dirs) {
+        try {
+          const entries = await fs.readdir(dir, { withFileTypes: true });
+          for (const entry of entries) {
+            if (entry.isDirectory()) {
+              hasSubdirectories = true;
+              continue;
+            }
+            if (!entry.isFile()) continue;
+            const fullPath = path.join(dir, entry.name);
+            files.push({
+              name: entry.name,
+              path: fullPath
+            });
+          }
+        } catch (err) {
+          const message = err instanceof Error ? err.message : '未知错误';
+          errors.push(`${dir}: ${message}`);
+        }
+      }
+
+      return { files, errors, hasSubdirectories };
     }
   );
 }

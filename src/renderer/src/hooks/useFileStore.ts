@@ -24,6 +24,8 @@ export type UseFileStoreResult = {
   files: FileItem[];
   highlightedIds: Set<string>;
   targetMode: TargetMode;
+  isScanDepthDialogOpen: boolean;
+  scanDepthDialogFolderCount: number;
   isRenaming: boolean;
   isApplying: boolean;
   isUndoing: boolean;
@@ -40,6 +42,9 @@ export type UseFileStoreResult = {
   revertFileName: (index: number) => void;
   applyRule: (handler: (name: string, index: number) => string) => void;
   handleDrop: (e: DragEvent<HTMLDivElement>) => void;
+  scanDepthRootOnly: () => void;
+  scanDepthRecursive: () => void;
+  closeScanDepthDialog: () => void;
   startRenaming: (instruction: string, config?: Partial<AIServiceConfig>) => Promise<void>;
   stopRenaming: () => void;
   applyRename: () => Promise<{
@@ -62,6 +67,8 @@ export function useFileStore(): UseFileStoreResult {
   const [files, setFiles] = useState<FileItem[]>([]);
   const [highlightedIds, setHighlightedIds] = useState<Set<string>>(new Set());
   const [targetMode, setTargetModeRaw] = useState<TargetMode>('file');
+  const [isScanDepthDialogOpen, setIsScanDepthDialogOpen] = useState(false);
+  const [scanDepthDialogFolderCount, setScanDepthDialogFolderCount] = useState(0);
   const [isRenaming, setIsRenaming] = useState(false);
   const [isApplying, setIsApplying] = useState(false);
   const [isUndoing, setIsUndoing] = useState(false);
@@ -69,6 +76,11 @@ export function useFileStore(): UseFileStoreResult {
   const filesRef = useRef<FileItem[]>([]);
   const abortControllerRef = useRef<AbortController | null>(null);
   const highlightTimerRef = useRef<number | null>(null);
+  const pendingScanDepthRef = useRef<{
+    folderPaths: string[];
+    directFiles: FileItem[];
+    shallowFiles: FileItem[];
+  } | null>(null);
 
   useEffect(() => {
     filesRef.current = files;
@@ -198,6 +210,9 @@ export function useFileStore(): UseFileStoreResult {
   const setTargetMode = useCallback((mode: TargetMode) => {
     setTargetModeRaw(mode);
     setFiles([]);
+    pendingScanDepthRef.current = null;
+    setIsScanDepthDialogOpen(false);
+    setScanDepthDialogFolderCount(0);
   }, []);
 
   const handleDrop = useCallback(
@@ -268,29 +283,68 @@ export function useFileStore(): UseFileStoreResult {
         }
 
         // 先添加直接拖入的文件
-        if (directFiles.length > 0) {
+        if (folderPaths.length === 0 && directFiles.length > 0) {
           addFiles(directFiles);
         }
 
         // 异步扫描文件夹并添加
         if (folderPaths.length > 0) {
-          electronApi.scanDirectory(folderPaths).then((result) => {
-            const scannedFiles: FileItem[] = result.files.map((f) => ({
+          electronApi.scanDirectoryShallow(folderPaths).then((result) => {
+            const shallowFiles: FileItem[] = result.files.map((f) => ({
               id: `${f.name}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
               original: f.name,
               renamed: f.name,
               path: f.path,
               isDirectory: false
             }));
-            if (scannedFiles.length > 0) {
-              addFiles(scannedFiles);
+
+            if (!result.hasSubdirectories) {
+              addFiles([...directFiles, ...shallowFiles]);
+              return;
             }
+
+            pendingScanDepthRef.current = { folderPaths, directFiles, shallowFiles };
+            setScanDepthDialogFolderCount(folderPaths.length);
+            setIsScanDepthDialogOpen(true);
           });
         }
       }
     },
     [addFiles, targetMode]
   );
+
+  const closeScanDepthDialog = useCallback(() => {
+    pendingScanDepthRef.current = null;
+    setIsScanDepthDialogOpen(false);
+    setScanDepthDialogFolderCount(0);
+  }, []);
+
+  const scanDepthRootOnly = useCallback(() => {
+    const pending = pendingScanDepthRef.current;
+    if (!pending) return;
+    addFiles([...pending.directFiles, ...pending.shallowFiles]);
+    closeScanDepthDialog();
+  }, [addFiles, closeScanDepthDialog]);
+
+  const scanDepthRecursive = useCallback(() => {
+    const pending = pendingScanDepthRef.current;
+    if (!pending) return;
+
+    addFiles(pending.directFiles);
+    const folderPaths = pending.folderPaths.slice();
+    closeScanDepthDialog();
+
+    void electronApi.scanDirectory(folderPaths).then((result) => {
+      const scannedFiles: FileItem[] = result.files.map((f) => ({
+        id: `${f.name}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        original: f.name,
+        renamed: f.name,
+        path: f.path,
+        isDirectory: false
+      }));
+      if (scannedFiles.length > 0) addFiles(scannedFiles);
+    });
+  }, [addFiles, closeScanDepthDialog]);
 
   const stopRenaming = useCallback(() => {
     if (abortControllerRef.current) {
@@ -502,6 +556,8 @@ export function useFileStore(): UseFileStoreResult {
     files,
     highlightedIds,
     targetMode,
+    isScanDepthDialogOpen,
+    scanDepthDialogFolderCount,
     isRenaming,
     isApplying,
     isUndoing,
@@ -518,6 +574,9 @@ export function useFileStore(): UseFileStoreResult {
     revertFileName,
     applyRule,
     handleDrop,
+    scanDepthRootOnly,
+    scanDepthRecursive,
+    closeScanDepthDialog,
     startRenaming,
     stopRenaming,
     applyRename,

@@ -76,3 +76,11 @@ export interface ScanDirectoryResult {
   files: ScannedFileItem[];
   errors: string[];
 }
+
+// 目录浅扫描结果（仅扫描当前层）
+export interface ScanDirectoryShallowResult {
+  files: ScannedFileItem[];
+  errors: string[];
+  /** 是否检测到子文件夹（用于决定是否需要递归扫描提示） */
+  hasSubdirectories: boolean;
+}

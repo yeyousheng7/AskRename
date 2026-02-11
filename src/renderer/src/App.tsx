@@ -6,6 +6,7 @@ import { useSettings } from '@/hooks/useSettings';
 import FileList from '@/components/FileList';
 import { ProgressOverlay } from '@/components/ProgressOverlay';
 import { SmartWarningDialog } from '@/components/SmartWarningDialog';
+import { ScanDepthDialog } from '@/components/ScanDepthDialog';
 import { PaginationBar } from '@/components/PaginationBar';
 import { SettingsDialog } from '@/components/SettingsDialog';
 import { Toast } from '@/components/Toast';
@@ -71,6 +72,8 @@ function App(): React.JSX.Element {
     files,
     highlightedIds,
     targetMode,
+    isScanDepthDialogOpen,
+    scanDepthDialogFolderCount,
     isRenaming,
     isApplying,
     isUndoing,
@@ -85,6 +88,9 @@ function App(): React.JSX.Element {
     discardChanges,
     revertFileName,
     handleDrop,
+    scanDepthRootOnly,
+    scanDepthRecursive,
+    closeScanDepthDialog,
     startRenaming,
     stopRenaming,
     applyRename,
@@ -648,6 +654,14 @@ function App(): React.JSX.Element {
           fn?.();
         }}
         onSwitchMode={handleModeChange}
+      />
+
+      <ScanDepthDialog
+        open={isScanDepthDialogOpen && targetMode === 'file'}
+        folderCount={scanDepthDialogFolderCount}
+        onClose={closeScanDepthDialog}
+        onRootOnly={scanDepthRootOnly}
+        onRecursive={scanDepthRecursive}
       />
 
       <ProgressOverlay

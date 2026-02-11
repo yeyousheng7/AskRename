@@ -7,7 +7,8 @@ import type {
   AIProvider,
   RenameFileItem,
   RenameResult,
-  ScanDirectoryResult
+  ScanDirectoryResult,
+  ScanDirectoryShallowResult
 } from '@shared/ipc-types';
 
 // ============================================================================
@@ -86,6 +87,13 @@ const api = {
    */
   scanDirectory: (dirs: string[]): Promise<ScanDirectoryResult> => {
     return ipcRenderer.invoke('app:scan-directory', dirs);
+  },
+
+  /**
+   * 浅扫描目录（仅当前层），并探测是否存在子文件夹
+   */
+  scanDirectoryShallow: (dirs: string[]): Promise<ScanDirectoryShallowResult> => {
+    return ipcRenderer.invoke('app:scan-directory-shallow', dirs);
   }
 };
 
