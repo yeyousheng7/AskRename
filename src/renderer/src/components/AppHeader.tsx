@@ -64,9 +64,7 @@ export function AppHeader({
       ) : hasChanges ? (
         <span className="font-mono text-xs text-emerald-500">(待审查)</span>
       ) : (
-        <span className="font-mono text-xs text-zinc-400 dark:text-zinc-500">
-          (点击编辑)
-        </span>
+        <span className="font-mono text-xs text-zinc-400 dark:text-zinc-500">(点击编辑)</span>
       )}
 
       <Divider />

@@ -4,6 +4,7 @@ import TextareaAutosize from 'react-textarea-autosize';
 import { Trash2, Undo2 } from 'lucide-react';
 import type { FileItem } from '@/types/file';
 import { cn } from '@/lib/utils';
+import { getFileIcon } from '@/utils/getFileIcon';
 
 const textStyles = 'font-mono text-sm leading-6';
 
@@ -194,7 +195,10 @@ function EditorRowImpl({
       </div>
 
       <div className="border-r border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/50 px-3 py-1.5">
-        <DiffRemovedText original={file.original} renamed={file.renamed} />
+        <div className="flex items-center gap-2">
+          <span className="shrink-0">{getFileIcon(file.original, file.isDirectory)}</span>
+          <DiffRemovedText original={file.original} renamed={file.renamed} />
+        </div>
       </div>
 
       {/* 中间列：行号 / 重置按钮 */}
@@ -215,30 +219,35 @@ function EditorRowImpl({
       </div>
 
       <div className="px-3 py-1.5 bg-white dark:bg-zinc-950">
-        {isLoading ? (
-          <div className="flex items-center h-6">
-            <div className="h-4 bg-gradient-to-r from-zinc-200 via-zinc-100 to-zinc-200 dark:from-zinc-700 dark:via-zinc-600 dark:to-zinc-700 rounded animate-pulse w-3/4" />
-          </div>
-        ) : editingIndex === index ? (
-          <TextareaAutosize
-            ref={textareaRef}
-            value={file.renamed}
-            onChange={(e) => onRename(file.id, e.target.value)}
-            onKeyDown={handleKeyDown}
-            onBlur={stopEditing}
-            className={cn(
-              'w-full bg-transparent resize-none focus:outline-none text-zinc-800 dark:text-zinc-200',
-              textStyles
-            )}
-            minRows={1}
-          />
-        ) : (
-          <DiffAddedText
-            original={file.original}
-            renamed={file.renamed}
-            onClick={() => setEditingIndex(index)}
-          />
-        )}
+        <div className="flex items-center gap-2">
+          <span className="shrink-0">{getFileIcon(file.renamed, file.isDirectory)}</span>
+          {isLoading ? (
+            <div className="flex items-center h-6 flex-1 min-w-0">
+              <div className="h-4 bg-gradient-to-r from-zinc-200 via-zinc-100 to-zinc-200 dark:from-zinc-700 dark:via-zinc-600 dark:to-zinc-700 rounded animate-pulse w-3/4" />
+            </div>
+          ) : editingIndex === index ? (
+            <TextareaAutosize
+              ref={textareaRef}
+              value={file.renamed}
+              onChange={(e) => onRename(file.id, e.target.value)}
+              onKeyDown={handleKeyDown}
+              onBlur={stopEditing}
+              className={cn(
+                'flex-1 min-w-0 bg-transparent resize-none focus:outline-none text-zinc-800 dark:text-zinc-200',
+                textStyles
+              )}
+              minRows={1}
+            />
+          ) : (
+            <div className="flex-1 min-w-0">
+              <DiffAddedText
+                original={file.original}
+                renamed={file.renamed}
+                onClick={() => setEditingIndex(index)}
+              />
+            </div>
+          )}
+        </div>
       </div>
 
       {/* 删除按钮 */}

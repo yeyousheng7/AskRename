@@ -287,7 +287,6 @@ function App(): React.JSX.Element {
     instruction,
     isRenaming,
     batchAI,
-    files.length,
     files,
     promptConfigureApiKey,
     settings,

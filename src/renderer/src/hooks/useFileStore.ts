@@ -230,7 +230,8 @@ export function useFileStore(): UseFileStoreResult {
               id: `${file.name}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
               original: file.name,
               renamed: file.name,
-              path: finalPath || file.name
+              path: finalPath || file.name,
+              isDirectory: true
             });
           }
         }
@@ -260,7 +261,8 @@ export function useFileStore(): UseFileStoreResult {
               id: `${file.name}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
               original: file.name,
               renamed: file.name,
-              path: finalPath || file.name
+              path: finalPath || file.name,
+              isDirectory: false
             });
           }
         }
@@ -277,7 +279,8 @@ export function useFileStore(): UseFileStoreResult {
               id: `${f.name}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
               original: f.name,
               renamed: f.name,
-              path: f.path
+              path: f.path,
+              isDirectory: false
             }));
             if (scannedFiles.length > 0) {
               addFiles(scannedFiles);

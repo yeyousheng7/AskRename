@@ -28,7 +28,7 @@ export function TargetModeSwitch({
               isActive && opt.value === 'file' && 'bg-blue-500 text-white shadow-sm',
               isActive && opt.value === 'folder' && 'bg-amber-500 text-white shadow-sm',
               !isActive &&
-              'text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700'
+                'text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700'
             )}
           >
             <Icon className="h-3 w-3" />
