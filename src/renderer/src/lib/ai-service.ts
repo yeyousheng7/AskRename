@@ -12,6 +12,8 @@ import { electronApi } from '@/lib/electron-api';
 
 export type AIProvider = 'openai' | 'deepseek' | 'ollama' | 'custom';
 
+export type RegexAssistResult = { find: string; replace: string };
+
 export interface AIServiceConfig {
   provider: AIProvider;
   apiKey: string;

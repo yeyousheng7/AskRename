@@ -1,5 +1,5 @@
-import type { RefObject } from 'react';
-import { LoaderIcon, Undo2Icon } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
+import { LoaderIcon, Sparkles, Undo2Icon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { HistoryDrawer } from '@/components/HistoryDrawer';
 import { CommandMenu } from '@/components/CommandMenu';
@@ -36,6 +36,7 @@ export function AppFooter({
   onConfirmDecision,
   onDiscardDecision,
   onUpdatePendingRegex,
+  onGenerateRegexAssist,
   // 原有回调
   onInstructionChange,
   onFindPatternChange,
@@ -68,6 +69,7 @@ export function AppFooter({
   onConfirmDecision: () => void;
   onDiscardDecision: () => void;
   onUpdatePendingRegex: (find: string, replace: string) => void;
+  onGenerateRegexAssist: (requirement: string) => Promise<{ find: string; replace: string }>;
   // 原有回调
   onInstructionChange: (next: string) => void;
   onFindPatternChange: (next: string) => void;
@@ -83,6 +85,67 @@ export function AppFooter({
   onSelectHistory: (text: string) => void;
 }): React.JSX.Element {
   const { presets, addPreset } = usePresets();
+  const [isAIAssistMode, setIsAIAssistMode] = useState(false);
+  const [aiAssistText, setAiAssistText] = useState('');
+  const aiAssistInputRef = useRef<HTMLInputElement | null>(null);
+  const findInputRef = useRef<HTMLInputElement | null>(null);
+  const aiAssistRequestIdRef = useRef(0);
+  const [isAIAssistLoading, setIsAIAssistLoading] = useState(false);
+
+  const submitAIAssist = useCallback((): void => {
+    if (isAIAssistLoading) return;
+
+    const requirement = aiAssistText.trim();
+    if (!requirement) {
+      showToast('Please describe your regex requirement first.', 'error');
+      return;
+    }
+
+    const requestId = (aiAssistRequestIdRef.current += 1);
+    setIsAIAssistLoading(true);
+
+    void (async () => {
+      try {
+        const result = await onGenerateRegexAssist(requirement);
+        if (aiAssistRequestIdRef.current !== requestId) return;
+
+        onFindPatternChange(result.find);
+        onReplacePatternChange(result.replace);
+        setIsAIAssistMode(false);
+        setAiAssistText('');
+        window.setTimeout(() => findInputRef.current?.focus(), 0);
+      } catch (err) {
+        if (aiAssistRequestIdRef.current !== requestId) return;
+        const message = err instanceof Error ? err.message : 'AI 生成正则失败，请重试';
+        showToast(message, 'error');
+      } finally {
+        if (aiAssistRequestIdRef.current === requestId) {
+          setIsAIAssistLoading(false);
+        }
+      }
+    })();
+  }, [
+    aiAssistText,
+    isAIAssistLoading,
+    onFindPatternChange,
+    onGenerateRegexAssist,
+    onReplacePatternChange,
+    showToast
+  ]);
+
+  useEffect(() => {
+    if (mode !== 'regex') {
+      setIsAIAssistMode(false);
+      setAiAssistText('');
+      setIsAIAssistLoading(false);
+    }
+  }, [mode]);
+
+  useEffect(() => {
+    if (!isAIAssistMode) return;
+    const t = window.setTimeout(() => aiAssistInputRef.current?.focus(), 0);
+    return () => window.clearTimeout(t);
+  }, [isAIAssistMode]);
 
   const slashMenu = useSlashPresetMenu({
     instruction,
@@ -206,18 +269,94 @@ export function AppFooter({
             {mode === 'regex' ? (
               // 正则模式：双行输入框
               <div className="h-full flex flex-col">
+                {isAIAssistMode ? (
+                  <div className="h-full flex items-center px-4">
+                    <div className="relative flex-1">
+                      <input
+                        ref={aiAssistInputRef}
+                        type="text"
+                        placeholder="\u2728 请描述您的正则需求 (例如: 删除所有括号内的内容)..."
+                        value={aiAssistText}
+                        onChange={(e) => setAiAssistText(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Escape') {
+                            e.preventDefault();
+                            aiAssistRequestIdRef.current += 1;
+                            setIsAIAssistLoading(false);
+                            setIsAIAssistMode(false);
+                            setAiAssistText('');
+                            return;
+                          }
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            submitAIAssist();
+                            return;
+                          }
+                        }}
+                        disabled={isEmpty || isDisabled || isAIAssistLoading}
+                        className={cn(
+                          'w-full px-0 pr-12 py-3 bg-transparent border-0 outline-none',
+                          'text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500',
+                          'font-mono text-sm'
+                        )}
+                      />
+
+                      <button
+                        type="button"
+                        onClick={submitAIAssist}
+                        disabled={isEmpty || isDisabled || isAIAssistLoading}
+                        className={cn(
+                          'absolute right-0 top-1/2 -translate-y-1/2',
+                          'p-1 rounded-md',
+                          'text-zinc-400 hover:text-amber-500 hover:bg-amber-50',
+                          'dark:text-zinc-500 dark:hover:text-amber-400 dark:hover:bg-amber-950/30',
+                          'disabled:opacity-40 disabled:pointer-events-none'
+                        )}
+                        title={isAIAssistLoading ? 'AI 生成中...' : '生成正则'}
+                      >
+                        {isAIAssistLoading ? (
+                          <LoaderIcon className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Sparkles className="h-4 w-4" />
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="relative flex-1">
                 <input
+                  ref={findInputRef}
                   type="text"
                   placeholder="查找正则..."
                   value={findPattern}
                   onChange={(e) => onFindPatternChange(e.target.value)}
                   disabled={isEmpty || isDisabled}
                   className={cn(
-                    'flex-1 px-4 py-2.5 bg-transparent border-0 outline-none',
+                    'w-full h-full px-4 pr-12 py-2.5 bg-transparent border-0 outline-none',
                     'text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500',
                     'font-mono text-sm'
                   )}
                 />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsAIAssistMode(true);
+                          setAiAssistText('');
+                        }}
+                        disabled={isEmpty || isDisabled || isAIAssistLoading}
+                        className={cn(
+                          'absolute right-3 top-1/2 -translate-y-1/2',
+                          'p-1 rounded-md',
+                          'text-zinc-400 hover:text-amber-500 hover:bg-amber-50',
+                          'dark:text-zinc-500 dark:hover:text-amber-400 dark:hover:bg-amber-950/30',
+                          'disabled:opacity-40 disabled:pointer-events-none'
+                        )}
+                        title="AI 辅助生成正则"
+                      >
+                        <Sparkles className="h-4 w-4" />
+                      </button>
+                    </div>
                 <div className="border-t border-zinc-200/50 dark:border-zinc-700/50 mx-4" />
                 <input
                   type="text"
@@ -231,6 +370,8 @@ export function AppFooter({
                     'font-mono text-sm'
                   )}
                 />
+                  </>
+                )}
               </div>
             ) : (
               // Auto/AI 模式：单行输入框 + Slash Command Menu

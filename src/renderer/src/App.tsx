@@ -20,6 +20,7 @@ import { useEvent } from '@/hooks/useEvent';
 import { useBatchAI } from '@/hooks/useBatchAI';
 import { electronApi } from '@/lib/electron-api';
 import { generateAutoDecision, getConfigFromEnv } from '@/lib/ai-service';
+import { generateRegexFromDescription } from '@/lib/regex-assist';
 import { batchApplyMagicRegex } from '@/lib/magic-regex';
 import { cn } from '@/lib/utils';
 import type { AISessionState, PendingDecision } from '@/types/ai';
@@ -501,6 +502,43 @@ function App(): React.JSX.Element {
     setTimeout(() => inputRef.current?.focus(), 50);
   }, []);
 
+  const handleGenerateRegexAssist = useCallback(
+    async (requirement: string): Promise<{ find: string; replace: string }> => {
+      let apiKeyToUse = settings.apiKey.trim();
+
+      if (settings.provider !== 'ollama' && !apiKeyToUse) {
+        try {
+          apiKeyToUse = ((await electronApi.getApiKey(settings.provider)) || '').trim();
+        } catch (err) {
+          console.error('Failed to load api key:', err);
+        }
+
+        if (!apiKeyToUse) {
+          promptConfigureApiKey();
+          throw new Error('请先配置 API Key 以继续');
+        }
+
+        updateSettings({ apiKey: apiKeyToUse });
+      }
+
+      const baseURL = settings.baseUrl.trim();
+      const model = settings.model.trim();
+      if (!baseURL) throw new Error('API Base URL 未配置');
+      if (!model) throw new Error('模型名称未配置');
+
+      const envCfg = getConfigFromEnv();
+      return generateRegexFromDescription(requirement, {
+        provider: settings.provider,
+        apiKey: apiKeyToUse,
+        baseURL,
+        model,
+        jsonMode: envCfg.jsonMode,
+        maxTokens: envCfg.maxTokens
+      });
+    },
+    [settings.apiKey, settings.baseUrl, settings.model, settings.provider, promptConfigureApiKey, updateSettings]
+  );
+
   const { isDragging, rootProps } = useFileDragOverlay(handleDrop);
 
   const isEmpty = files.length === 0;
@@ -675,6 +713,7 @@ function App(): React.JSX.Element {
         onConfirmDecision={() => void handleConfirmDecision()}
         onDiscardDecision={handleDiscardDecision}
         onUpdatePendingRegex={handleUpdatePendingRegex}
+        onGenerateRegexAssist={handleGenerateRegexAssist}
         onInstructionChange={(next) => setInstruction(next)}
         onFindPatternChange={(next) => setFindPattern(next)}
         onReplacePatternChange={(next) => setReplacePattern(next)}
