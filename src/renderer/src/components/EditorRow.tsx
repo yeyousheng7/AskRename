@@ -111,9 +111,6 @@ function EditorRowImpl({
 }: EditorRowProps): React.JSX.Element {
   const [isHovered, setIsHovered] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const [previewBump, setPreviewBump] = useState(0);
-  const previousRenamedRef = useRef(file.renamed);
-  const bumpTimerRef = useRef<number | null>(null);
 
   // 检查该行是否有修改
   const hasChange = file.original !== file.renamed;
@@ -183,33 +180,6 @@ function EditorRowImpl({
     }
   }, [isEditing]);
 
-  useEffect(() => {
-    if (!animatePreview) return;
-    if (isLoading) return;
-    if (isEditing) return;
-
-    const previous = previousRenamedRef.current;
-    previousRenamedRef.current = file.renamed;
-
-    if (previous === file.renamed) return;
-
-    if (bumpTimerRef.current) window.clearTimeout(bumpTimerRef.current);
-    setPreviewBump((v) => v + 1);
-    bumpTimerRef.current = window.setTimeout(() => {
-      bumpTimerRef.current = null;
-      setPreviewBump(0);
-    }, 220);
-  }, [animatePreview, file.renamed, isEditing, isLoading]);
-
-  useEffect(() => {
-    return () => {
-      if (bumpTimerRef.current) {
-        window.clearTimeout(bumpTimerRef.current);
-        bumpTimerRef.current = null;
-      }
-    };
-  }, []);
-
   return (
     <div
       className={cn(
@@ -251,18 +221,16 @@ function EditorRowImpl({
       </div>
 
       <div className="px-3 py-1.5 bg-white dark:bg-zinc-950">
-        <div
-          className={cn(
-            'flex items-center gap-2',
-            previewBump !== 0 && 'animate-in fade-in-0 slide-in-from-right-1 duration-200'
-          )}
-        >
-          <span className="shrink-0">{getFileIcon(file.renamed, file.isDirectory)}</span>
-          {isLoading ? (
+        {isLoading ? (
+          <div className="flex items-center gap-2">
+            <span className="shrink-0">{getFileIcon(file.renamed, file.isDirectory)}</span>
             <div className="flex items-center h-6 flex-1 min-w-0">
               <div className="h-4 bg-gradient-to-r from-zinc-200 via-zinc-100 to-zinc-200 dark:from-zinc-700 dark:via-zinc-600 dark:to-zinc-700 rounded animate-pulse w-3/4" />
             </div>
-          ) : editingIndex === index ? (
+          </div>
+        ) : editingIndex === index ? (
+          <div className="flex items-center gap-2">
+            <span className="shrink-0">{getFileIcon(file.renamed, file.isDirectory)}</span>
             <TextareaAutosize
               ref={textareaRef}
               value={file.renamed}
@@ -275,7 +243,16 @@ function EditorRowImpl({
               )}
               minRows={1}
             />
-          ) : (
+          </div>
+        ) : (
+          <div
+            key={animatePreview ? file.renamed : 'static'}
+            className={cn(
+              'flex items-center gap-2',
+              animatePreview && 'animate-in fade-in-0 slide-in-from-right-1 duration-200'
+            )}
+          >
+            <span className="shrink-0">{getFileIcon(file.renamed, file.isDirectory)}</span>
             <div className="flex-1 min-w-0">
               <DiffAddedText
                 original={file.original}
@@ -283,8 +260,8 @@ function EditorRowImpl({
                 onClick={() => setEditingIndex(index)}
               />
             </div>
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
       {/* 删除按钮 */}

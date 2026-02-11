@@ -29,7 +29,6 @@ export function ClearAllButton({
       window.clearTimeout(timerRef.current);
       timerRef.current = null;
     }
-    setState('idle');
   }, [disabled]);
 
   const handleClick = useCallback(() => {
@@ -52,7 +51,7 @@ export function ClearAllButton({
     }
   }, [disabled, state, onClear]);
 
-  if (state === 'confirming') {
+  if (state === 'confirming' && !disabled) {
     return (
       <button
         onClick={handleClick}

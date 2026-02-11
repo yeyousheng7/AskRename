@@ -9,7 +9,10 @@ const SYSTEM_PROMPT =
 
 function parseJsonFromModel(content: string): unknown {
   try {
-    const cleaned = content.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+    const cleaned = content
+      .replace(/^```(?:json)?\s*/i, '')
+      .replace(/\s*```$/i, '')
+      .trim();
     return JSON.parse(cleaned);
   } catch {
     throw new Error(`AI 返回不是有效 JSON：${content.slice(0, 120)}...`);
@@ -67,4 +70,3 @@ export async function generateRegexFromDescription(
 
   return { find: record.find, replace: record.replace };
 }
-

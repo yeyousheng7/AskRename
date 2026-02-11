@@ -252,69 +252,69 @@ function App(): React.JSX.Element {
     async (instructionText: string) => {
       const trimmedInstruction = instructionText.trim();
       if (mode !== 'ai') return;
-    if (
-      isRenaming ||
-      batchAI.status === 'processing' ||
-      files.length === 0 ||
+      if (
+        isRenaming ||
+        batchAI.status === 'processing' ||
+        files.length === 0 ||
         !trimmedInstruction
-    ) {
-      return;
-    }
-
-    let apiKeyToUse = settings.apiKey.trim();
-    if (settings.provider !== 'ollama' && !apiKeyToUse) {
-      try {
-        apiKeyToUse = ((await electronApi.getApiKey(settings.provider)) || '').trim();
-      } catch (err) {
-        console.error('Failed to load api key:', err);
-      }
-
-      if (!apiKeyToUse) {
-        promptConfigureApiKey();
+      ) {
         return;
       }
 
-      updateSettings({ apiKey: apiKeyToUse });
-    }
+      let apiKeyToUse = settings.apiKey.trim();
+      if (settings.provider !== 'ollama' && !apiKeyToUse) {
+        try {
+          apiKeyToUse = ((await electronApi.getApiKey(settings.provider)) || '').trim();
+        } catch (err) {
+          console.error('Failed to load api key:', err);
+        }
 
-    setError(null);
+        if (!apiKeyToUse) {
+          promptConfigureApiKey();
+          return;
+        }
+
+        updateSettings({ apiKey: apiKeyToUse });
+      }
+
+      setError(null);
       addToHistory(trimmedInstruction);
-    try {
-      if (files.length > 20) {
-        const envCfg = getConfigFromEnv();
-        const baseURL = settings.baseUrl.trim();
-        const model = settings.model.trim();
-        if (!baseURL) throw new Error('API Base URL 未配置');
-        if (!model) throw new Error('模型名称未配置');
+      try {
+        if (files.length > 20) {
+          const envCfg = getConfigFromEnv();
+          const baseURL = settings.baseUrl.trim();
+          const model = settings.model.trim();
+          if (!baseURL) throw new Error('API Base URL 未配置');
+          if (!model) throw new Error('模型名称未配置');
 
-        batchAI.start({
-          items: files.map((f) => ({ id: f.id, original: f.original })),
+          batchAI.start({
+            items: files.map((f) => ({ id: f.id, original: f.original })),
             instruction: trimmedInstruction,
-          settings: {
+            settings: {
+              provider: settings.provider,
+              apiKey: apiKeyToUse,
+              baseURL,
+              model,
+              jsonMode: envCfg.jsonMode,
+              maxTokens: envCfg.maxTokens
+            },
+            onBatchApplied: ({ items, resultNames }) => {
+              items.forEach((it, i) => updateFileName(it.id, resultNames[i] || ''));
+            }
+          });
+        } else {
+          await startRenaming(trimmedInstruction, {
             provider: settings.provider,
             apiKey: apiKeyToUse,
-            baseURL,
-            model,
-            jsonMode: envCfg.jsonMode,
-            maxTokens: envCfg.maxTokens
-          },
-          onBatchApplied: ({ items, resultNames }) => {
-            items.forEach((it, i) => updateFileName(it.id, resultNames[i] || ''));
-          }
-        });
-      } else {
-          await startRenaming(trimmedInstruction, {
-          provider: settings.provider,
-          apiKey: apiKeyToUse,
-          baseURL: settings.baseUrl,
-          model: settings.model
-        });
+            baseURL: settings.baseUrl,
+            model: settings.model
+          });
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : '重命名失败，请重试';
+        setError(message);
+        console.error('重命名失败:', err);
       }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : '重命名失败，请重试';
-      setError(message);
-      console.error('重命名失败:', err);
-    }
     },
     [
       mode,
@@ -586,7 +586,14 @@ function App(): React.JSX.Element {
         maxTokens: envCfg.maxTokens
       });
     },
-    [settings.apiKey, settings.baseUrl, settings.model, settings.provider, promptConfigureApiKey, updateSettings]
+    [
+      settings.apiKey,
+      settings.baseUrl,
+      settings.model,
+      settings.provider,
+      promptConfigureApiKey,
+      updateSettings
+    ]
   );
 
   const { isDragging, rootProps } = useFileDragOverlay(handleDrop);
