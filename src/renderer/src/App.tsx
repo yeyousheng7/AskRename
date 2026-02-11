@@ -96,7 +96,9 @@ function App(): React.JSX.Element {
     applyRename,
     resetAfterApply,
     undo
-  } = useFileStore();
+  } = useFileStore({
+    onFilesIgnored: (count) => showToast(`文件夹模式下已忽略 ${count} 个文件`, 'error')
+  });
 
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE);

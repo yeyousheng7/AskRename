@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type DragEvent,
+  type SetStateAction
+} from 'react';
 import type { FileItem, TargetMode } from '@/types/file';
 import { generateNewNames, type AIServiceConfig } from '@/lib/ai-service';
 import { ensureExtension } from '@/lib/filename';
@@ -17,6 +24,12 @@ export type HistoryItem = {
   timestamp: number;
   /** 反向操作列表（撤销时执行） */
   undoItems: RenamedItem[];
+};
+
+// Hook 配置选项
+export type UseFileStoreOptions = {
+  /** 文件夹模式下拖入文件时触发的回调，参数为被忽略的文件数 */
+  onFilesIgnored?: (count: number) => void;
 };
 
 // Hook 返回类型
@@ -63,8 +76,10 @@ function arrayMove<T>(items: T[], oldIndex: number, newIndex: number): T[] {
   return next;
 }
 
-export function useFileStore(): UseFileStoreResult {
-  const [files, setFiles] = useState<FileItem[]>([]);
+export function useFileStore(options?: UseFileStoreOptions): UseFileStoreResult {
+  // ── 独立的双列表状态 ──
+  const [fileList, setFileList] = useState<FileItem[]>([]);
+  const [folderList, setFolderList] = useState<FileItem[]>([]);
   const [highlightedIds, setHighlightedIds] = useState<Set<string>>(new Set());
   const [targetMode, setTargetModeRaw] = useState<TargetMode>('file');
   const [isScanDepthDialogOpen, setIsScanDepthDialogOpen] = useState(false);
@@ -73,18 +88,41 @@ export function useFileStore(): UseFileStoreResult {
   const [isApplying, setIsApplying] = useState(false);
   const [isUndoing, setIsUndoing] = useState(false);
   const [history, setHistory] = useState<HistoryItem[]>([]);
-  const filesRef = useRef<FileItem[]>([]);
+  const targetModeRef = useRef<TargetMode>('file');
   const abortControllerRef = useRef<AbortController | null>(null);
   const highlightTimerRef = useRef<number | null>(null);
+  const onFilesIgnoredRef = useRef(options?.onFilesIgnored);
   const pendingScanDepthRef = useRef<{
     folderPaths: string[];
     directFiles: FileItem[];
     shallowFiles: FileItem[];
   } | null>(null);
 
+  // ── 计算属性：当前模式的可见列表 ──
+  const currentFiles = targetMode === 'file' ? fileList : folderList;
+
+  // 稳定的 setter，根据 targetModeRef 分派到对应列表
+  const setCurrentFiles = useCallback((updater: SetStateAction<FileItem[]>) => {
+    if (targetModeRef.current === 'file') {
+      setFileList(updater);
+    } else {
+      setFolderList(updater);
+    }
+  }, []);
+
+  // Ref 始终跟踪当前模式列表（供闭包安全读取）
+  const currentFilesRef = useRef<FileItem[]>([]);
   useEffect(() => {
-    filesRef.current = files;
-  }, [files]);
+    currentFilesRef.current = currentFiles;
+  }, [currentFiles]);
+
+  useEffect(() => {
+    targetModeRef.current = targetMode;
+  }, [targetMode]);
+
+  useEffect(() => {
+    onFilesIgnoredRef.current = options?.onFilesIgnored;
+  }, [options?.onFilesIgnored]);
 
   useEffect(() => {
     return () => {
@@ -95,121 +133,143 @@ export function useFileStore(): UseFileStoreResult {
     };
   }, []);
 
-  // 检查是否有未应用的更改
-  const hasChanges = files.some((file) => file.original !== file.renamed);
+  // 检查是否有未应用的更改（仅针对当前模式列表）
+  const hasChanges = currentFiles.some((file) => file.original !== file.renamed);
 
   // 检查是否可以撤销
   const canUndo = history.length > 0;
 
-  const addFiles = useCallback((newFiles: FileItem[]) => {
-    if (newFiles.length === 0) return;
+  const addFiles = useCallback(
+    (newFiles: FileItem[]) => {
+      if (newFiles.length === 0) return;
 
-    // 收集重复文件的 ID
-    const duplicateIds: string[] = [];
-    const current = filesRef.current;
+      // 收集重复文件的 ID
+      const duplicateIds: string[] = [];
+      const current = currentFilesRef.current;
 
-    const keyToId = new Map(current.map((f) => [getDedupeKey(f), f.id]));
-    const keys = new Set(current.map(getDedupeKey));
-    const next = [...current];
+      const keyToId = new Map(current.map((f) => [getDedupeKey(f), f.id]));
+      const keys = new Set(current.map(getDedupeKey));
+      const next = [...current];
 
-    for (const file of newFiles) {
-      const key = getDedupeKey(file);
-      if (keys.has(key)) {
-        const existingId = keyToId.get(key);
-        if (existingId) duplicateIds.push(existingId);
-        continue;
-      }
-      keys.add(key);
-      keyToId.set(key, file.id);
-      next.push(file);
-    }
-
-    setFiles(next);
-
-    // 触发高亮动画
-    if (duplicateIds.length > 0) {
-      // 清除之前的定时器
-      if (highlightTimerRef.current) {
-        window.clearTimeout(highlightTimerRef.current);
+      for (const file of newFiles) {
+        const key = getDedupeKey(file);
+        if (keys.has(key)) {
+          const existingId = keyToId.get(key);
+          if (existingId) duplicateIds.push(existingId);
+          continue;
+        }
+        keys.add(key);
+        keyToId.set(key, file.id);
+        next.push(file);
       }
 
-      // 强制重启动画（同一行被重复触发时，class 不变会导致动画不重新播放）
-      setHighlightedIds(new Set());
-      window.requestAnimationFrame(() => {
-        setHighlightedIds(new Set(duplicateIds));
-      });
+      setCurrentFiles(next);
 
-      // 1.5 秒后清除高亮
-      highlightTimerRef.current = window.setTimeout(() => {
+      // 触发高亮动画
+      if (duplicateIds.length > 0) {
+        // 清除之前的定时器
+        if (highlightTimerRef.current) {
+          window.clearTimeout(highlightTimerRef.current);
+        }
+
+        // 强制重启动画（同一行被重复触发时，class 不变会导致动画不重新播放）
         setHighlightedIds(new Set());
-        highlightTimerRef.current = null;
-      }, 1500);
-    }
-  }, []);
+        window.requestAnimationFrame(() => {
+          setHighlightedIds(new Set(duplicateIds));
+        });
 
-  const reorderFiles = useCallback((oldIndex: number, newIndex: number) => {
-    if (oldIndex === newIndex) return;
+        // 1.5 秒后清除高亮
+        highlightTimerRef.current = window.setTimeout(() => {
+          setHighlightedIds(new Set());
+          highlightTimerRef.current = null;
+        }, 1500);
+      }
+    },
+    [setCurrentFiles]
+  );
 
-    setFiles((prev) => {
-      if (oldIndex < 0 || newIndex < 0) return prev;
-      if (oldIndex >= prev.length || newIndex >= prev.length) return prev;
-      return arrayMove(prev, oldIndex, newIndex);
-    });
-  }, []);
+  const reorderFiles = useCallback(
+    (oldIndex: number, newIndex: number) => {
+      if (oldIndex === newIndex) return;
 
-  const updateFileName = useCallback((id: string, newName: string) => {
-    setFiles((prev) => prev.map((file) => (file.id === id ? { ...file, renamed: newName } : file)));
-  }, []);
+      setCurrentFiles((prev) => {
+        if (oldIndex < 0 || newIndex < 0) return prev;
+        if (oldIndex >= prev.length || newIndex >= prev.length) return prev;
+        return arrayMove(prev, oldIndex, newIndex);
+      });
+    },
+    [setCurrentFiles]
+  );
 
-  const batchUpdateFileNames = useCallback((newNames: string[]) => {
-    setFiles((prev) =>
-      prev.map((file, index) => ({
-        ...file,
-        renamed: newNames[index] ?? file.renamed
-      }))
-    );
-  }, []);
+  const updateFileName = useCallback(
+    (id: string, newName: string) => {
+      setCurrentFiles((prev) =>
+        prev.map((file) => (file.id === id ? { ...file, renamed: newName } : file))
+      );
+    },
+    [setCurrentFiles]
+  );
+
+  const batchUpdateFileNames = useCallback(
+    (newNames: string[]) => {
+      setCurrentFiles((prev) =>
+        prev.map((file, index) => ({
+          ...file,
+          renamed: newNames[index] ?? file.renamed
+        }))
+      );
+    },
+    [setCurrentFiles]
+  );
 
   const clearFiles = useCallback(() => {
-    setFiles([]);
-  }, []);
+    setCurrentFiles([]);
+  }, [setCurrentFiles]);
 
   // 移除单个文件（仅从 UI 列表移除，不删除物理文件）
-  const removeFile = useCallback((id: string) => {
-    setFiles((prev) => prev.filter((file) => file.id !== id));
-  }, []);
+  const removeFile = useCallback(
+    (id: string) => {
+      setCurrentFiles((prev) => prev.filter((file) => file.id !== id));
+    },
+    [setCurrentFiles]
+  );
 
   // 放弃更改：将所有 renamed 重置为 original
   const discardChanges = useCallback(() => {
-    setFiles((prev) =>
+    setCurrentFiles((prev) =>
       prev.map((file) => ({
         ...file,
         renamed: file.original
       }))
     );
-  }, []);
+  }, [setCurrentFiles]);
 
   // 单行重置：将指定索引的文件 renamed 重置为 original
-  const revertFileName = useCallback((index: number) => {
-    setFiles((prev) =>
-      prev.map((file, i) => (i === index ? { ...file, renamed: file.original } : file))
-    );
-  }, []);
+  const revertFileName = useCallback(
+    (index: number) => {
+      setCurrentFiles((prev) =>
+        prev.map((file, i) => (i === index ? { ...file, renamed: file.original } : file))
+      );
+    },
+    [setCurrentFiles]
+  );
 
   // 应用规则：使用 handler 函数批量修改所有文件的 renamed
-  const applyRule = useCallback((handler: (name: string, index: number) => string) => {
-    setFiles((prev) =>
-      prev.map((file, index) => ({
-        ...file,
-        renamed: handler(file.renamed, index)
-      }))
-    );
-  }, []);
+  const applyRule = useCallback(
+    (handler: (name: string, index: number) => string) => {
+      setCurrentFiles((prev) =>
+        prev.map((file, index) => ({
+          ...file,
+          renamed: handler(file.renamed, index)
+        }))
+      );
+    },
+    [setCurrentFiles]
+  );
 
-  // 切换目标模式时自动清空列表
+  // 切换目标模式：不清理数据，实现"记忆"效果
   const setTargetMode = useCallback((mode: TargetMode) => {
     setTargetModeRaw(mode);
-    setFiles([]);
     pendingScanDepthRef.current = null;
     setIsScanDepthDialogOpen(false);
     setScanDepthDialogFolderCount(0);
@@ -227,11 +287,9 @@ export function useFileStore(): UseFileStoreResult {
 
       if (targetMode === 'folder') {
         // 文件夹模式：仅保留文件夹，忽略文件
-        // DataTransfer 中的文件夹有特征：size === 0 且无扩展名（但不完全可靠）
-        // 更可靠的方法是通过 Electron 获取路径后在 main 进程判断
-        // 这里用简单方式：通过 webkitGetAsEntry 判断
         const items = e.dataTransfer.items;
         const folderFiles: FileItem[] = [];
+        let ignoredFileCount = 0;
 
         for (let i = 0; i < items.length; i++) {
           const entry = items[i].webkitGetAsEntry?.();
@@ -248,10 +306,15 @@ export function useFileStore(): UseFileStoreResult {
               path: finalPath || file.name,
               isDirectory: true
             });
+          } else {
+            ignoredFileCount++;
           }
         }
 
         addFiles(folderFiles);
+        if (ignoredFileCount > 0) {
+          onFilesIgnoredRef.current?.(ignoredFileCount);
+        }
       } else {
         // 文件模式：文件直接保留，文件夹递归扫描
         const items = e.dataTransfer.items;
@@ -356,7 +419,8 @@ export function useFileStore(): UseFileStoreResult {
 
   const startRenaming = useCallback(
     async (instruction: string, config?: Partial<AIServiceConfig>) => {
-      if (files.length === 0) {
+      const snapshot = currentFilesRef.current;
+      if (snapshot.length === 0) {
         console.warn('没有文件可重命名');
         return;
       }
@@ -372,7 +436,7 @@ export function useFileStore(): UseFileStoreResult {
       setIsRenaming(true);
 
       try {
-        const originalNames = files.map((f) => f.original);
+        const originalNames = snapshot.map((f) => f.original);
         const newNames = await generateNewNames(originalNames, instruction, config);
 
         // 检查是否被中断
@@ -386,11 +450,13 @@ export function useFileStore(): UseFileStoreResult {
         abortControllerRef.current = null;
       }
     },
-    [files, batchUpdateFileNames]
+    [batchUpdateFileNames]
   );
 
   const applyRename = useCallback(async () => {
-    if (files.length === 0 || !hasChanges) {
+    const snapshot = currentFilesRef.current;
+    const snapshotHasChanges = snapshot.some((f) => f.original !== f.renamed);
+    if (snapshot.length === 0 || !snapshotHasChanges) {
       return { successCount: 0, errors: [] as RenameError[], renamed: [] as RenamedItem[] };
     }
 
@@ -399,7 +465,7 @@ export function useFileStore(): UseFileStoreResult {
     try {
       const localErrors: RenameError[] = [];
 
-      const renameList = files
+      const renameList = snapshot
         .filter((file) => file.original !== file.renamed)
         .flatMap((file): RenameFileItem[] => {
           if (!isAbsolutePathLike(file.path)) {
@@ -466,34 +532,37 @@ export function useFileStore(): UseFileStoreResult {
     } finally {
       setIsApplying(false);
     }
-  }, [files, hasChanges]);
+  }, []);
 
   // 重命名成功后重置列表
   // 从后端返回的实际路径（可能带序号）更新状态
-  const resetAfterApply = useCallback((renamed?: RenamedItem[]) => {
-    const pathMap = new Map((renamed || []).map((r) => [r.oldPath, r.newPath]));
+  const resetAfterApply = useCallback(
+    (renamed?: RenamedItem[]) => {
+      const pathMap = new Map((renamed || []).map((r) => [r.oldPath, r.newPath]));
 
-    setFiles((prev) =>
-      prev.map((file) => {
-        const actualNewPath = pathMap.get(file.path);
-        if (actualNewPath) {
-          // 从实际路径提取文件名作为新的 original
-          const actualFileName = actualNewPath.split(/[\\/]/).pop() || file.renamed;
+      setCurrentFiles((prev) =>
+        prev.map((file) => {
+          const actualNewPath = pathMap.get(file.path);
+          if (actualNewPath) {
+            // 从实际路径提取文件名作为新的 original
+            const actualFileName = actualNewPath.split(/[\\/]/).pop() || file.renamed;
+            return {
+              ...file,
+              original: actualFileName,
+              renamed: actualFileName,
+              path: actualNewPath
+            };
+          }
+          // 未改名的保持原样
           return {
             ...file,
-            original: actualFileName,
-            renamed: actualFileName,
-            path: actualNewPath
+            original: file.renamed
           };
-        }
-        // 未改名的保持原样
-        return {
-          ...file,
-          original: file.renamed
-        };
-      })
-    );
-  }, []);
+        })
+      );
+    },
+    [setCurrentFiles]
+  );
 
   // 撤销上一次操作
   const undo = useCallback(async (): Promise<{ success: boolean; error?: string }> => {
@@ -522,14 +591,13 @@ export function useFileStore(): UseFileStoreResult {
       // 从历史记录中移除
       setHistory((prev) => prev.slice(0, -1));
 
-      // 更新文件列表：将新路径改回旧路径
+      // 更新文件列表：两个列表都更新，路径匹配保证只改对应项
       if (result.renamed && result.renamed.length > 0) {
         const pathMap = new Map(result.renamed.map((r) => [r.oldPath, r.newPath]));
-        setFiles((prev) =>
+        const updater = (prev: FileItem[]): FileItem[] =>
           prev.map((file) => {
             const newPath = pathMap.get(file.path);
             if (newPath) {
-              // 从路径中提取文件名
               const newName = newPath.split(/[/\\]/).pop() || file.original;
               return {
                 ...file,
@@ -539,8 +607,9 @@ export function useFileStore(): UseFileStoreResult {
               };
             }
             return file;
-          })
-        );
+          });
+        setFileList(updater);
+        setFolderList(updater);
       }
 
       return { success: true };
@@ -553,7 +622,7 @@ export function useFileStore(): UseFileStoreResult {
   }, [history]);
 
   return {
-    files,
+    files: currentFiles,
     highlightedIds,
     targetMode,
     isScanDepthDialogOpen,
