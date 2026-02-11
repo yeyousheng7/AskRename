@@ -34,6 +34,7 @@ export type FileListProps = {
   onAfterReorder: () => void;
   isLoading?: boolean;
   isDisabled?: boolean;
+  animatePreview?: boolean;
 };
 
 export default function FileList({
@@ -49,7 +50,8 @@ export default function FileList({
   reorderFiles,
   onAfterReorder,
   isLoading = false,
-  isDisabled = false
+  isDisabled = false,
+  animatePreview = false
 }: FileListProps): React.JSX.Element {
   const [activeId, setActiveId] = useState<string | null>(null);
 
@@ -118,6 +120,7 @@ export default function FileList({
               onRemove={onRemove}
               isLoading={isLoading}
               isHighlighted={highlightedIds.has(file.id)}
+              animatePreview={animatePreview}
               disabled={isDisabled}
             />
           ))}
@@ -140,6 +143,7 @@ export default function FileList({
                   onRemove={onRemove}
                   isLoading={isLoading}
                   isHighlighted={highlightedIds.has(activeFile.id)}
+                  animatePreview={animatePreview}
                 />
               </div>
             ) : null}

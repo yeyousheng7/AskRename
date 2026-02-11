@@ -159,12 +159,9 @@ export function AppFooter({
 
   const savePreset = useSavePresetCommand({ inputRef, addPreset, showToast });
   const isDisabled = isRenaming || isApplying || isUndoing;
-  const canSubmit = mode === 'regex' ? findPattern.trim() : instruction.trim();
+  const canSubmit =
+    mode === 'regex' ? findPattern.trim() : instruction.trim();
   const handlePrimarySubmit = (): void => {
-    if (mode === 'regex' && isReviewMode) {
-      onApply();
-      return;
-    }
     if (
       savePreset.maybeOpenFromInstruction(instruction, onInstructionChange, {
         onBeforeBegin: slashMenu.close
@@ -190,16 +187,16 @@ export function AppFooter({
         onClick={onUndo}
         size="icon"
         variant="ghost"
-        disabled={!canUndo || isDisabled}
+        disabled={(!canUndo && !isReviewMode) || isDisabled}
         className={cn(
           'fixed bottom-6 left-6 z-50 h-10 w-10 rounded-full',
           'bg-white/80 dark:bg-zinc-900/80 backdrop-blur-xl',
           'shadow-lg ring-1 ring-black/5 dark:ring-white/10',
           'hover:bg-white dark:hover:bg-zinc-800',
           'transition-all duration-200',
-          (!canUndo || isDisabled) && 'opacity-40'
+          ((!canUndo && !isReviewMode) || isDisabled) && 'opacity-40'
         )}
-        title={canUndo ? '撤销上一步操作' : '没有可撤销的操作'}
+        title={canUndo ? '撤销上一步操作' : isReviewMode ? '撤回预览更改' : '没有可撤销的操作'}
       >
         {isUndoing ? (
           <LoaderIcon className="h-4 w-4 animate-spin" />
@@ -244,7 +241,17 @@ export function AppFooter({
         )}
 
         {/* 非智能模式的审查模式操作栏 */}
-        {isReviewMode && (mode !== 'auto' || aiSession !== 'review') && (
+        {isReviewMode && mode === 'ai' && (
+          <FooterPendingDecisionCard
+            pendingDecision={{ type: 'list', names: [] }}
+            isApplying={isApplying}
+            onUpdatePendingRegex={() => undefined}
+            onDiscardDecision={onDiscard}
+            onConfirmDecision={onApply}
+          />
+        )}
+
+        {isReviewMode && (mode === 'regex' || (mode === 'auto' && aiSession !== 'review')) && (
           <FooterReviewActionsBar
             isApplying={isApplying}
             isUndoing={isUndoing}
@@ -453,13 +460,13 @@ export function AppFooter({
             mode={mode}
             aiSession={aiSession}
             instruction={instruction}
+            isReviewMode={isReviewMode}
             isRenaming={isRenaming}
             isApplying={isApplying}
             isEmpty={isEmpty}
             isDisabled={isDisabled}
             canSubmit={canSubmit}
             onStop={onStop}
-            onConfirmDecision={onConfirmDecision}
             onPrimary={handlePrimarySubmit}
           />
         </div>

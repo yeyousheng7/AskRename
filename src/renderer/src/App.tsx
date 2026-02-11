@@ -45,6 +45,7 @@ function App(): React.JSX.Element {
   // AI Session 状态：智能模式下的会话状态机
   const [aiSession, setAISession] = useState<AISessionState>('idle');
   const [pendingDecision, setPendingDecision] = useState<PendingDecision>(null);
+  const autoDecisionRequestIdRef = useRef<string | null>(null);
 
   // AI 模式状态
   const [instruction, setInstruction] = useState('');
@@ -97,6 +98,7 @@ function App(): React.JSX.Element {
 
   // 是否处于审查模式（有待应用的更改）
   const isReviewMode = hasChanges && !isRenaming && batchAI.status === 'idle';
+  const isAutoDecisionLoading = mode === 'auto' && aiSession === 'loading';
 
   const filesRef = useRef(files);
   useEffect(() => {
@@ -158,7 +160,17 @@ function App(): React.JSX.Element {
     (newMode: Mode) => {
       if (newMode === mode) return;
 
+      const autoDecisionRequestId = autoDecisionRequestIdRef.current;
+      if (autoDecisionRequestId) {
+        autoDecisionRequestIdRef.current = null;
+        void electronApi.cancelAI(autoDecisionRequestId).catch(() => undefined);
+      }
+
       // 切换时清空输入并重置预览
+      pendingAiContinueRef.current = null;
+      pendingAiInstructionSnapshotRef.current = '';
+      setAISession('idle');
+      setPendingDecision(null);
       setInstruction('');
       setFindPattern('');
       setReplacePattern('');
@@ -205,17 +217,29 @@ function App(): React.JSX.Element {
   const handleUndo = useCallback(async () => {
     if (isUndoing) return;
 
+    // UX: if we have preview changes (not applied yet), "undo" acts as "discard preview changes".
+    if (!canUndo && hasChanges) {
+      discardChanges();
+      if (aiSession === 'review') {
+        setPendingDecision(null);
+        setAISession('idle');
+      }
+      showToast('已撤回预览更改', 'success');
+      return;
+    }
+
     const result = await undo();
     if (result.success) {
       showToast('撤销成功', 'success');
     } else {
       showToast(`撤销失败：${result.error}`, 'error');
     }
-  }, [isUndoing, undo, showToast]);
+  }, [aiSession, canUndo, discardChanges, hasChanges, isUndoing, undo, showToast]);
   const handleUndoEvent = useEvent(handleUndo);
 
   const [isLargeAiWarningOpen, setIsLargeAiWarningOpen] = useState(false);
   const pendingAiContinueRef = useRef<(() => void) | null>(null);
+  const pendingAiInstructionSnapshotRef = useRef<string>('');
 
   // AI 生成处理
   const doRename = useCallback(
@@ -311,14 +335,18 @@ function App(): React.JSX.Element {
       return;
     }
 
+    const snapshot = instruction;
+
     if (files.length > 50) {
-      const snapshot = instruction;
+      pendingAiInstructionSnapshotRef.current = snapshot;
       pendingAiContinueRef.current = () => void doRename(snapshot);
+      setInstruction('');
       setIsLargeAiWarningOpen(true);
       return;
     }
 
-    await doRename(instruction);
+    setInstruction('');
+    await doRename(snapshot);
   }, [mode, isRenaming, batchAI.status, files.length, instruction, doRename]);
 
   // Auto 模式：AI 决策引擎
@@ -353,6 +381,8 @@ function App(): React.JSX.Element {
     addToHistory(instruction);
 
     // 立即反馈：清空输入框，设置 loading 状态
+    const requestId = `auto:decision:${Date.now()}:${Math.random().toString(16).slice(2)}`;
+    autoDecisionRequestIdRef.current = requestId;
     setAISession('loading');
     setInstruction('');
     setError(null);
@@ -360,12 +390,20 @@ function App(): React.JSX.Element {
     try {
       // 调用 AI 获取决策
       const fileNames = files.map((f) => f.original);
-      const decision = await generateAutoDecision(fileNames, instruction, {
-        provider: settings.provider,
-        apiKey: apiKeyToUse,
-        baseURL: settings.baseUrl,
-        model: settings.model
-      });
+      const decision = await generateAutoDecision(
+        fileNames,
+        instruction,
+        {
+          provider: settings.provider,
+          apiKey: apiKeyToUse,
+          baseURL: settings.baseUrl,
+          model: settings.model
+        },
+        requestId
+      );
+
+      if (autoDecisionRequestIdRef.current !== requestId) return;
+      autoDecisionRequestIdRef.current = null;
 
       if (decision.type === 'regex') {
         // AI 决定使用正则：【不切换模式】，存入 pendingDecision，应用预览
@@ -409,6 +447,8 @@ function App(): React.JSX.Element {
         }
       }
     } catch (err) {
+      if (autoDecisionRequestIdRef.current !== requestId) return;
+      autoDecisionRequestIdRef.current = null;
       const message = err instanceof Error ? err.message : 'AI 决策失败，请重试';
       setError(message);
       setAISession('idle');
@@ -592,11 +632,16 @@ function App(): React.JSX.Element {
       <SmartWarningDialog
         open={isLargeAiWarningOpen}
         onClose={() => {
+          if (pendingAiInstructionSnapshotRef.current) {
+            setInstruction(pendingAiInstructionSnapshotRef.current);
+            pendingAiInstructionSnapshotRef.current = '';
+          }
           pendingAiContinueRef.current = null;
           setIsLargeAiWarningOpen(false);
         }}
         onContinue={() => {
           const fn = pendingAiContinueRef.current;
+          pendingAiInstructionSnapshotRef.current = '';
           pendingAiContinueRef.current = null;
           setIsLargeAiWarningOpen(false);
           setInstruction('');
@@ -643,7 +688,6 @@ function App(): React.JSX.Element {
       {/* 表头 */}
       <AppHeader
         filesLength={files.length}
-        isEmpty={isEmpty}
         isRenaming={isRenaming || batchAI.status === 'processing'}
         hasChanges={hasChanges}
         targetMode={targetMode}
@@ -692,8 +736,15 @@ function App(): React.JSX.Element {
               onRemove={removeFile}
               reorderFiles={reorderFiles}
               onAfterReorder={handleAfterReorder}
-              isLoading={isRenaming}
-              isDisabled={isRenaming || isApplying || isUndoing || batchAI.status === 'processing'}
+              isLoading={isRenaming || isAutoDecisionLoading}
+              isDisabled={
+                isRenaming ||
+                isAutoDecisionLoading ||
+                isApplying ||
+                isUndoing ||
+                batchAI.status === 'processing'
+              }
+              animatePreview={mode !== 'regex'}
             />
           </ScrollArea>
         </>
@@ -729,6 +780,15 @@ function App(): React.JSX.Element {
           if (batchAI.status === 'processing') {
             batchAI.cancel();
             showToast('已取消任务', 'success');
+            return;
+          }
+          const autoDecisionRequestId = autoDecisionRequestIdRef.current;
+          if (aiSession === 'loading' && autoDecisionRequestId) {
+            autoDecisionRequestIdRef.current = null;
+            void electronApi.cancelAI(autoDecisionRequestId).catch(() => undefined);
+            setAISession('idle');
+            setPendingDecision(null);
+            showToast('已取消生成', 'success');
             return;
           }
           stopRenaming();

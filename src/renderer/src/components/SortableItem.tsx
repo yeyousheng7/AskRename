@@ -20,6 +20,7 @@ export default function SortableItem({
   onRemove,
   isLoading,
   isHighlighted,
+  animatePreview,
   disabled = false
 }: SortableItemProps): React.JSX.Element {
   const {
@@ -77,6 +78,7 @@ export default function SortableItem({
         onRemove={onRemove}
         isLoading={isLoading}
         isHighlighted={isHighlighted}
+        animatePreview={animatePreview}
       />
     </div>
   );

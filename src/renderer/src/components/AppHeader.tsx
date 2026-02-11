@@ -9,7 +9,6 @@ function Divider(): React.JSX.Element {
 
 export function AppHeader({
   filesLength,
-  isEmpty,
   isRenaming,
   hasChanges,
   targetMode,
@@ -20,7 +19,6 @@ export function AppHeader({
   onTargetModeChange
 }: {
   filesLength: number;
-  isEmpty: boolean;
   isRenaming: boolean;
   hasChanges: boolean;
   targetMode: TargetMode;
@@ -36,14 +34,11 @@ export function AppHeader({
       <span className="font-mono text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
         原始文本
       </span>
-      {!isEmpty && (
-        <>
-          <span className="font-mono text-xs tabular-nums text-zinc-400 dark:text-zinc-500">
-            ({filesLength})
-          </span>
-          <ClearAllButton onClear={onClear} />
-        </>
-      )}
+      <span className="font-mono text-xs tabular-nums text-zinc-400 dark:text-zinc-500">
+        ({filesLength})
+      </span>
+      <div className="w-2" />
+      <ClearAllButton onClear={onClear} disabled={filesLength === 0} />
 
       <Divider />
 

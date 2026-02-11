@@ -279,7 +279,8 @@ AI 任务示例：
 export async function generateAutoDecision(
   files: string[],
   userInstruction: string,
-  config?: Partial<AIServiceConfig>
+  config?: Partial<AIServiceConfig>,
+  requestId?: string
 ): Promise<AIDecision> {
   const finalConfig: AIServiceConfig = { ...getConfigFromEnv(), ...config };
   const { provider, apiKey, baseURL, model, jsonMode, maxTokens } = finalConfig;
@@ -317,7 +318,8 @@ ${JSON.stringify(sampleFiles)}
   // 通过 IPC 调用主进程
   const response = await electronApi.askAI(
     { provider, apiKey, baseURL, model, jsonMode, maxTokens },
-    messages
+    messages,
+    requestId
   );
 
   if (!response.success) {

@@ -93,6 +93,7 @@ export type EditorRowProps = {
   onRemove?: (id: string) => void;
   isLoading?: boolean;
   isHighlighted?: boolean;
+  animatePreview?: boolean;
 };
 
 function EditorRowImpl({
@@ -105,10 +106,14 @@ function EditorRowImpl({
   onRevert,
   onRemove,
   isLoading = false,
-  isHighlighted = false
+  isHighlighted = false,
+  animatePreview = false
 }: EditorRowProps): React.JSX.Element {
   const [isHovered, setIsHovered] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [previewBump, setPreviewBump] = useState(0);
+  const previousRenamedRef = useRef(file.renamed);
+  const bumpTimerRef = useRef<number | null>(null);
 
   // 检查该行是否有修改
   const hasChange = file.original !== file.renamed;
@@ -178,6 +183,33 @@ function EditorRowImpl({
     }
   }, [isEditing]);
 
+  useEffect(() => {
+    if (!animatePreview) return;
+    if (isLoading) return;
+    if (isEditing) return;
+
+    const previous = previousRenamedRef.current;
+    previousRenamedRef.current = file.renamed;
+
+    if (previous === file.renamed) return;
+
+    if (bumpTimerRef.current) window.clearTimeout(bumpTimerRef.current);
+    setPreviewBump((v) => v + 1);
+    bumpTimerRef.current = window.setTimeout(() => {
+      bumpTimerRef.current = null;
+      setPreviewBump(0);
+    }, 220);
+  }, [animatePreview, file.renamed, isEditing, isLoading]);
+
+  useEffect(() => {
+    return () => {
+      if (bumpTimerRef.current) {
+        window.clearTimeout(bumpTimerRef.current);
+        bumpTimerRef.current = null;
+      }
+    };
+  }, []);
+
   return (
     <div
       className={cn(
@@ -219,7 +251,12 @@ function EditorRowImpl({
       </div>
 
       <div className="px-3 py-1.5 bg-white dark:bg-zinc-950">
-        <div className="flex items-center gap-2">
+        <div
+          className={cn(
+            'flex items-center gap-2',
+            previewBump !== 0 && 'animate-in fade-in-0 slide-in-from-right-1 duration-200'
+          )}
+        >
           <span className="shrink-0">{getFileIcon(file.renamed, file.isDirectory)}</span>
           {isLoading ? (
             <div className="flex items-center h-6 flex-1 min-w-0">
@@ -282,7 +319,8 @@ function areEditorRowPropsEqual(prev: EditorRowProps, next: EditorRowProps): boo
     prev.onRevert === next.onRevert &&
     prev.onRemove === next.onRemove &&
     prev.isLoading === next.isLoading &&
-    prev.isHighlighted === next.isHighlighted
+    prev.isHighlighted === next.isHighlighted &&
+    prev.animatePreview === next.animatePreview
   );
 }
 
