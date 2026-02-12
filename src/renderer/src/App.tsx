@@ -51,20 +51,15 @@ function App(): React.JSX.Element {
   const autoDecisionRequestIdRef = useRef<string | null>(null);
 
   // AI 模式状态
-  const [instruction, setInstruction] = useState('');
   const [isLargeAiWarningOpen, setIsLargeAiWarningOpen] = useState(false);
   const [pendingAiContinue, setPendingAiContinue] = useState<(() => void) | null>(null);
-  const [pendingAiInstructionSnapshot, setPendingAiInstructionSnapshot] = useState('');
 
-  // 正则模式状态
-  const [findPattern, setFindPattern] = useState('');
-  const [replacePattern, setReplacePattern] = useState('');
+  const regexParamsRef = useRef<RegexSubmitParams>({ findPattern: '', replacePattern: '' });
 
   const [error, setError] = useState<string | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const settingsOpenTimerRef = useRef<number | null>(null);
   const [settingsForcedTab, setSettingsForcedTab] = useState<SettingsTabId | null>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const { resolvedTheme, toggleTheme } = useTheme();
   const { settings, updateSettings } = useSettings();
@@ -125,7 +120,21 @@ function App(): React.JSX.Element {
     .sort()
     .join('\u0000');
 
-  // 正则实时预览引擎（支持魔法变量）
+  const handleRegexPreviewChange = useCallback(
+    (params: RegexSubmitParams) => {
+      regexParamsRef.current = params;
+      if (mode !== 'regex') return;
+
+      const currentFiles = filesRef.current;
+      if (currentFiles.length === 0) return;
+
+      const filenames = currentFiles.map((f) => f.original);
+      const newNames = computeRegexPreviewNames(filenames, params);
+      batchUpdateFileNames(newNames, 'rule');
+    },
+    [mode, batchUpdateFileNames]
+  );
+
   useEffect(() => {
     if (mode !== 'regex') return;
 
@@ -133,10 +142,9 @@ function App(): React.JSX.Element {
     if (currentFiles.length === 0) return;
 
     const filenames = currentFiles.map((f) => f.original);
-    const newNames = computeRegexPreviewNames(filenames, { findPattern, replacePattern });
-
+    const newNames = computeRegexPreviewNames(filenames, regexParamsRef.current);
     batchUpdateFileNames(newNames, 'rule');
-  }, [mode, findPattern, replacePattern, stableOriginalNamesKey, batchUpdateFileNames]);
+  }, [mode, stableOriginalNamesKey, batchUpdateFileNames]);
 
   const [reorderNonce, setReorderNonce] = useState(0);
   const handleAfterReorder = useCallback(() => {
@@ -145,24 +153,15 @@ function App(): React.JSX.Element {
 
   const recomputeIfMagicEnabledAfterReorder = useCallback(() => {
     const preview = resolveReorderMagicPreview(mode, files, {
-      findPattern,
-      replacePattern,
+      findPattern: regexParamsRef.current.findPattern,
+      replacePattern: regexParamsRef.current.replacePattern,
       aiSession,
       pendingDecision,
       pendingRegexOrigin
     });
     if (!preview) return;
     batchUpdateFileNames(preview.names, preview.origin);
-  }, [
-    files,
-    mode,
-    replacePattern,
-    findPattern,
-    batchUpdateFileNames,
-    aiSession,
-    pendingDecision,
-    pendingRegexOrigin
-  ]);
+  }, [files, mode, batchUpdateFileNames, aiSession, pendingDecision, pendingRegexOrigin]);
 
   useEffect(() => {
     if (reorderNonce === 0) return;
@@ -182,13 +181,10 @@ function App(): React.JSX.Element {
 
       // 切换时清空输入并重置预览
       setPendingAiContinue(null);
-      setPendingAiInstructionSnapshot('');
       setAISession('idle');
       setPendingDecision(null);
       setPendingRegexOrigin('ai');
-      setInstruction('');
-      setFindPattern('');
-      setReplacePattern('');
+      regexParamsRef.current = { findPattern: '', replacePattern: '' };
       discardChanges();
       setError(null);
 
@@ -347,135 +343,133 @@ function App(): React.JSX.Element {
     ]
   );
 
-  const handleRename = useCallback(async () => {
-    if (mode !== 'ai') return;
-    if (
-      isRenaming ||
-      batchAI.status === 'processing' ||
-      files.length === 0 ||
-      !instruction.trim()
-    ) {
-      return;
-    }
+  const handleRename = useCallback(
+    async (instructionText: string) => {
+      const nextInstruction = instructionText.trim();
+      if (mode !== 'ai') return;
+      if (isRenaming || batchAI.status === 'processing' || files.length === 0 || !nextInstruction) {
+        return;
+      }
 
-    const snapshot = instruction;
+      const snapshot = nextInstruction;
 
-    if (files.length > 50) {
-      setPendingAiInstructionSnapshot(snapshot);
-      setPendingAiContinue(() => () => void doRename(snapshot));
-      setInstruction('');
-      setIsLargeAiWarningOpen(true);
-      return;
-    }
+      if (files.length > 50) {
+        setPendingAiContinue(() => () => void doRename(snapshot));
+        setIsLargeAiWarningOpen(true);
+        return;
+      }
 
-    setInstruction('');
-    await doRename(snapshot);
-  }, [mode, isRenaming, batchAI.status, files.length, instruction, doRename]);
+      await doRename(snapshot);
+    },
+    [mode, isRenaming, batchAI.status, files.length, doRename]
+  );
 
   // Smart 模式：AI 决策引擎
-  const handleSmartRename = useCallback(async () => {
-    if (
-      aiSession === 'loading' ||
-      batchAI.status === 'processing' ||
-      files.length === 0 ||
-      !instruction.trim()
-    ) {
-      return;
-    }
-
-    const apiKeyToUse = await resolveApiKey();
-    if (!apiKeyToUse && settings.provider !== 'ollama') return;
-
-    // 记录指令到历史（在清空前）
-    addToHistory(instruction);
-
-    // 立即反馈：清空输入框，设置 loading 状态
-    const requestId = `smart:decision:${Date.now()}:${Math.random().toString(16).slice(2)}`;
-    autoDecisionRequestIdRef.current = requestId;
-    setAISession('loading');
-    setInstruction('');
-    setError(null);
-
-    try {
-      // 调用 AI 获取决策
-      const fileNames = files.map((f) => f.original);
-      const decision = await generateAutoDecision(
-        fileNames,
-        instruction,
-        {
-          provider: settings.provider,
-          apiKey: apiKeyToUse ?? undefined,
-          baseURL: settings.baseUrl,
-          model: settings.model
-        },
-        requestId
-      );
-
-      if (autoDecisionRequestIdRef.current !== requestId) return;
-      autoDecisionRequestIdRef.current = null;
-
-      if (decision.type === 'regex') {
-        // AI 决定使用正则：【不切换模式】，存入 pendingDecision，应用预览
-        setPendingDecision(decision);
-        setPendingRegexOrigin('ai');
-        // 应用正则预览
-        const newNames = computeRegexPreviewNames(fileNames, {
-          findPattern: decision.find,
-          replacePattern: decision.replace
-        });
-        batchUpdateFileNames(newNames, 'ai');
-        setAISession('review');
-      } else {
-        // AI 返回文件名列表
-        if (files.length > 20) {
-          // 文件超过样本数，需要完整 AI 处理（使用批处理）
-          setAISession('idle');
-
-          const envCfg = getConfigFromEnv();
-          const { baseURL, model } = resolveModelSettings();
-
-          batchAI.start({
-            items: files.map((f) => ({ id: f.id, original: f.original })),
-            instruction,
-            settings: {
-              provider: settings.provider,
-              apiKey: apiKeyToUse ?? '',
-              baseURL,
-              model,
-              jsonMode: envCfg.jsonMode,
-              maxTokens: envCfg.maxTokens
-            },
-            onBatchApplied: ({ items, resultNames }) => {
-              items.forEach((it, i) => updateFileName(it.id, resultNames[i] || '', 'ai'));
-            }
-          });
-        } else {
-          // 文件数在样本范围内，直接使用返回结果
-          setPendingDecision(decision);
-          batchUpdateFileNames(decision.names, 'ai');
-          setAISession('review');
-        }
+  const handleSmartRename = useCallback(
+    async (instructionText: string) => {
+      const nextInstruction = instructionText.trim();
+      if (
+        aiSession === 'loading' ||
+        batchAI.status === 'processing' ||
+        files.length === 0 ||
+        !nextInstruction
+      ) {
+        return;
       }
-    } catch (err) {
-      if (autoDecisionRequestIdRef.current !== requestId) return;
-      autoDecisionRequestIdRef.current = null;
-      const message = err instanceof Error ? err.message : 'AI 决策失败，请重试';
-      setError(message);
-      setAISession('idle');
-      console.error('Smart rename failed:', err);
-    }
-  }, [
-    instruction,
-    aiSession,
-    batchAI,
-    files,
-    settings,
-    resolveApiKey,
-    resolveModelSettings,
-    batchUpdateFileNames,
-    addToHistory,
-    updateFileName
-  ]);
+
+      const apiKeyToUse = await resolveApiKey();
+      if (!apiKeyToUse && settings.provider !== 'ollama') return;
+
+      // 记录指令到历史（在清空前）
+      addToHistory(nextInstruction);
+
+      // 立即反馈：清空输入框，设置 loading 状态
+      const requestId = `smart:decision:${Date.now()}:${Math.random().toString(16).slice(2)}`;
+      autoDecisionRequestIdRef.current = requestId;
+      setAISession('loading');
+      setError(null);
+
+      try {
+        // 调用 AI 获取决策
+        const fileNames = files.map((f) => f.original);
+        const decision = await generateAutoDecision(
+          fileNames,
+          nextInstruction,
+          {
+            provider: settings.provider,
+            apiKey: apiKeyToUse ?? undefined,
+            baseURL: settings.baseUrl,
+            model: settings.model
+          },
+          requestId
+        );
+
+        if (autoDecisionRequestIdRef.current !== requestId) return;
+        autoDecisionRequestIdRef.current = null;
+
+        if (decision.type === 'regex') {
+          // AI 决定使用正则：【不切换模式】，存入 pendingDecision，应用预览
+          setPendingDecision(decision);
+          setPendingRegexOrigin('ai');
+          // 应用正则预览
+          const newNames = computeRegexPreviewNames(fileNames, {
+            findPattern: decision.find,
+            replacePattern: decision.replace
+          });
+          batchUpdateFileNames(newNames, 'ai');
+          setAISession('review');
+        } else {
+          // AI 返回文件名列表
+          if (files.length > 20) {
+            // 文件超过样本数，需要完整 AI 处理（使用批处理）
+            setAISession('idle');
+
+            const envCfg = getConfigFromEnv();
+            const { baseURL, model } = resolveModelSettings();
+
+            batchAI.start({
+              items: files.map((f) => ({ id: f.id, original: f.original })),
+              instruction: nextInstruction,
+              settings: {
+                provider: settings.provider,
+                apiKey: apiKeyToUse ?? '',
+                baseURL,
+                model,
+                jsonMode: envCfg.jsonMode,
+                maxTokens: envCfg.maxTokens
+              },
+              onBatchApplied: ({ items, resultNames }) => {
+                items.forEach((it, i) => updateFileName(it.id, resultNames[i] || '', 'ai'));
+              }
+            });
+          } else {
+            // 文件数在样本范围内，直接使用返回结果
+            setPendingDecision(decision);
+            batchUpdateFileNames(decision.names, 'ai');
+            setAISession('review');
+          }
+        }
+      } catch (err) {
+        if (autoDecisionRequestIdRef.current !== requestId) return;
+        autoDecisionRequestIdRef.current = null;
+        const message = err instanceof Error ? err.message : 'AI 决策失败，请重试';
+        setError(message);
+        setAISession('idle');
+        console.error('Smart rename failed:', err);
+      }
+    },
+    [
+      aiSession,
+      batchAI,
+      files,
+      settings,
+      resolveApiKey,
+      resolveModelSettings,
+      batchUpdateFileNames,
+      addToHistory,
+      updateFileName
+    ]
+  );
 
   const handleGenerateByStrategy = useCallback(
     async (params?: unknown) => {
@@ -485,10 +479,12 @@ function App(): React.JSX.Element {
       };
 
       if (mode === 'regex') {
-        const regexParams: RegexSubmitParams =
-          params && typeof params === 'object' && 'findPattern' in params
-            ? (params as RegexSubmitParams)
-            : { findPattern, replacePattern };
+        if (!params || typeof params !== 'object' || !('findPattern' in params)) {
+          showToast('正则参数无效', 'error');
+          return;
+        }
+
+        const regexParams = params as RegexSubmitParams;
 
         const result = await executeModeStrategy(mode, files, regexParams, runners);
         if (!result.ok) {
@@ -501,27 +497,19 @@ function App(): React.JSX.Element {
         return;
       }
 
-      const textParams: TextSubmitParams =
-        params && typeof params === 'object' && 'instruction' in params
-          ? (params as TextSubmitParams)
-          : { instruction };
+      if (!params || typeof params !== 'object' || !('instruction' in params)) {
+        showToast('请输入指令', 'error');
+        return;
+      }
+
+      const textParams = params as TextSubmitParams;
 
       const result = await executeModeStrategy(mode, files, textParams, runners);
       if (!result.ok) {
         showToast(result.error, 'error');
       }
     },
-    [
-      mode,
-      findPattern,
-      replacePattern,
-      showToast,
-      files,
-      batchUpdateFileNames,
-      instruction,
-      handleSmartRename,
-      handleRename
-    ]
+    [mode, showToast, files, batchUpdateFileNames, handleSmartRename, handleRename]
   );
 
   // 放弃 AI 决策
@@ -545,8 +533,11 @@ function App(): React.JSX.Element {
         replacePattern: replace
       });
       batchUpdateFileNames(newNames, 'rule');
+      if (mode === 'regex') {
+        regexParamsRef.current = { findPattern: find, replacePattern: replace };
+      }
     },
-    [pendingDecision, files, batchUpdateFileNames]
+    [pendingDecision, files, batchUpdateFileNames, mode]
   );
 
   // 放弃更改
@@ -583,7 +574,6 @@ function App(): React.JSX.Element {
         });
         // 重置列表，准备下一轮
         resetAfterApply(result.renamed);
-        setInstruction('');
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : '应用失败，请重试';
@@ -600,12 +590,6 @@ function App(): React.JSX.Element {
     setPendingDecision(null);
     setAISession('idle');
   }, [aiSession, pendingDecision, handleApply]);
-
-  // 历史记录选择：回填到策略上下文
-  const handleSelectHistory = useCallback((text: string) => {
-    setInstruction(text);
-    setTimeout(() => inputRef.current?.focus(), 50);
-  }, []);
 
   const handleGenerateRegexAssist = useCallback(
     async (requirement: string): Promise<{ find: string; replace: string }> => {
@@ -674,19 +658,13 @@ function App(): React.JSX.Element {
       <SmartWarningDialog
         open={isLargeAiWarningOpen}
         onClose={() => {
-          if (pendingAiInstructionSnapshot) {
-            setInstruction(pendingAiInstructionSnapshot);
-            setPendingAiInstructionSnapshot('');
-          }
           setPendingAiContinue(null);
           setIsLargeAiWarningOpen(false);
         }}
         onContinue={() => {
           const fn = pendingAiContinue;
-          setPendingAiInstructionSnapshot('');
           setPendingAiContinue(null);
           setIsLargeAiWarningOpen(false);
-          setInstruction('');
           fn?.();
         }}
         onSwitchMode={handleModeChange}
@@ -801,13 +779,10 @@ function App(): React.JSX.Element {
       )}
 
       <AppFooter
+        stableOriginalNamesKey={stableOriginalNamesKey}
         mode={mode}
         onModeChange={handleModeChange}
         error={error}
-        instruction={instruction}
-        findPattern={findPattern}
-        replacePattern={replacePattern}
-        inputRef={inputRef}
         isEmpty={isEmpty}
         isReviewMode={isReviewMode}
         isRenaming={isRenaming || batchAI.status === 'processing'}
@@ -820,9 +795,7 @@ function App(): React.JSX.Element {
         onDiscardDecision={handleDiscardDecision}
         onUpdatePendingRegex={handleUpdatePendingRegex}
         onGenerateRegexAssist={handleGenerateRegexAssist}
-        onInstructionChange={(next) => setInstruction(next)}
-        onFindPatternChange={(next) => setFindPattern(next)}
-        onReplacePatternChange={(next) => setReplacePattern(next)}
+        onRegexPreviewChange={handleRegexPreviewChange}
         onUndo={() => void handleUndoEvent()}
         onDiscard={handleDiscard}
         onApply={() => void handleApply()}
@@ -843,10 +816,9 @@ function App(): React.JSX.Element {
           }
           stopRenaming();
         }}
-        onGenerate={() => void handleGenerateByStrategy()}
+        onGenerate={(params) => void handleGenerateByStrategy(params)}
         showToast={showToast}
         history={history}
-        onSelectHistory={handleSelectHistory}
       />
     </div>
   );

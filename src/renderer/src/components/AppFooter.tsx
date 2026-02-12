@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { LoaderIcon, Undo2Icon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { HistoryDrawer } from '@/components/HistoryDrawer';
@@ -16,6 +16,7 @@ import { RegexModeInput } from '@/components/footer/inputs/RegexModeInput';
 import { TextModeInput } from '@/components/footer/inputs/TextModeInput';
 import { useSavePresetCommand } from '@/hooks/useSavePresetCommand';
 import { useSlashPresetMenu } from '@/hooks/useSlashPresetMenu';
+import type { RegexSubmitParams, TextSubmitParams } from '@renderer/types/types';
 import {
   getFooterInputVariant,
   getModeSubmitInput,
@@ -25,13 +26,10 @@ import {
 } from '@/modes/registry';
 
 export function AppFooter({
+  stableOriginalNamesKey,
   mode,
   onModeChange,
   error,
-  instruction,
-  findPattern,
-  replacePattern,
-  inputRef,
   isEmpty,
   isReviewMode,
   isRenaming,
@@ -44,25 +42,19 @@ export function AppFooter({
   onDiscardDecision,
   onUpdatePendingRegex,
   onGenerateRegexAssist,
-  onInstructionChange,
-  onFindPatternChange,
-  onReplacePatternChange,
+  onRegexPreviewChange,
   onUndo,
   onDiscard,
   onApply,
   onStop,
   onGenerate,
   showToast,
-  history,
-  onSelectHistory
+  history
 }: {
+  stableOriginalNamesKey: string;
   mode: Mode;
   onModeChange: (mode: Mode) => void;
   error: string | null;
-  instruction: string;
-  findPattern: string;
-  replacePattern: string;
-  inputRef: RefObject<HTMLTextAreaElement | null>;
   isEmpty: boolean;
   isReviewMode: boolean;
   isRenaming: boolean;
@@ -75,19 +67,20 @@ export function AppFooter({
   onDiscardDecision: () => void;
   onUpdatePendingRegex: (find: string, replace: string) => void;
   onGenerateRegexAssist: (requirement: string) => Promise<{ find: string; replace: string }>;
-  onInstructionChange: (next: string) => void;
-  onFindPatternChange: (next: string) => void;
-  onReplacePatternChange: (next: string) => void;
+  onRegexPreviewChange: (params: RegexSubmitParams) => void;
   onUndo: () => void;
   onDiscard: () => void;
   onApply: () => void;
   onStop: () => void;
-  onGenerate: () => void;
+  onGenerate: (params: RegexSubmitParams | TextSubmitParams) => void;
   showToast: (message: string, type: ToastType) => void;
   history: string[];
-  onSelectHistory: (text: string) => void;
 }): React.JSX.Element {
   const { presets, addPreset } = usePresets();
+  const [instruction, setInstruction] = useState('');
+  const [findPattern, setFindPattern] = useState('');
+  const [replacePattern, setReplacePattern] = useState('');
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const [isAIAssistMode, setIsAIAssistMode] = useState(false);
   const [aiAssistText, setAiAssistText] = useState('');
   const aiAssistInputRef = useRef<HTMLInputElement | null>(null);
@@ -112,8 +105,8 @@ export function AppFooter({
         const result = await onGenerateRegexAssist(requirement);
         if (aiAssistRequestIdRef.current !== requestId) return;
 
-        onFindPatternChange(result.find);
-        onReplacePatternChange(result.replace);
+        setFindPattern(result.find);
+        setReplacePattern(result.replace);
         setIsAIAssistMode(false);
         setAiAssistText('');
         window.setTimeout(() => findInputRef.current?.focus(), 0);
@@ -127,14 +120,7 @@ export function AppFooter({
         }
       }
     })();
-  }, [
-    aiAssistText,
-    isAIAssistLoading,
-    onFindPatternChange,
-    onGenerateRegexAssist,
-    onReplacePatternChange,
-    showToast
-  ]);
+  }, [aiAssistText, isAIAssistLoading, onGenerateRegexAssist, showToast]);
 
   useEffect(() => {
     if (mode !== 'regex') {
@@ -155,9 +141,9 @@ export function AppFooter({
     presets,
     inputRef,
     onModeChange,
-    onInstructionChange,
-    onFindPatternChange,
-    onReplacePatternChange
+    onInstructionChange: setInstruction,
+    onFindPatternChange: setFindPattern,
+    onReplacePatternChange: setReplacePattern
   });
 
   const savePreset = useSavePresetCommand({ inputRef, addPreset, showToast });
@@ -171,15 +157,30 @@ export function AppFooter({
     isReviewMode
   });
 
+  useEffect(() => {
+    setInstruction('');
+    setFindPattern('');
+    setReplacePattern('');
+  }, [mode]);
+
+  useEffect(() => {
+    if (mode !== 'regex') return;
+    onRegexPreviewChange({ findPattern, replacePattern });
+  }, [mode, findPattern, replacePattern, onRegexPreviewChange, stableOriginalNamesKey]);
+
   const handlePrimarySubmit = (): void => {
     if (
-      savePreset.maybeOpenFromInstruction(instruction, onInstructionChange, {
+      savePreset.maybeOpenFromInstruction(instruction, setInstruction, {
         onBeforeBegin: slashMenu.close
       })
     ) {
       return;
     }
-    onGenerate();
+    if (mode === 'regex') {
+      onGenerate({ findPattern, replacePattern });
+      return;
+    }
+    onGenerate({ instruction });
   };
 
   return (
@@ -226,7 +227,13 @@ export function AppFooter({
         )}
       >
         {strategyUi?.showHistoryDrawer && (
-          <HistoryDrawer history={history} onSelect={onSelectHistory} />
+          <HistoryDrawer
+            history={history}
+            onSelect={(text) => {
+              setInstruction(text);
+              setTimeout(() => inputRef.current?.focus(), 50);
+            }}
+          />
         )}
 
         {error && (
@@ -288,8 +295,8 @@ export function AppFooter({
                 aiAssistInputRef={aiAssistInputRef}
                 findInputRef={findInputRef}
                 onAiAssistTextChange={setAiAssistText}
-                onFindPatternChange={onFindPatternChange}
-                onReplacePatternChange={onReplacePatternChange}
+                onFindPatternChange={setFindPattern}
+                onReplacePatternChange={setReplacePattern}
                 onSubmitAIAssist={submitAIAssist}
                 onOpenAIAssist={() => {
                   setIsAIAssistMode(true);
@@ -312,8 +319,8 @@ export function AppFooter({
                 aiSession={aiSession}
                 slashMenu={slashMenu}
                 savePreset={savePreset}
-                onInstructionChange={onInstructionChange}
-                onGenerate={onGenerate}
+                onInstructionChange={setInstruction}
+                onGenerate={() => onGenerate({ instruction })}
                 onConfirmDecision={onConfirmDecision}
                 onDiscardDecision={onDiscardDecision}
               />
