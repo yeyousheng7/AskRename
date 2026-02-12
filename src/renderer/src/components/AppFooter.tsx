@@ -1,9 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
-import TextareaAutosize from 'react-textarea-autosize';
-import { LoaderIcon, Sparkles, Undo2Icon } from 'lucide-react';
+import { LoaderIcon, Undo2Icon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { HistoryDrawer } from '@/components/HistoryDrawer';
-import { CommandMenu } from '@/components/CommandMenu';
 import { usePresets } from '@/hooks/usePresets';
 import type { ToastType } from '@/hooks/useToast';
 import type { AISessionState, PendingDecision } from '@/types/ai';
@@ -14,9 +12,12 @@ import { SavePresetDialog } from '@/components/footer/SavePresetDialog';
 import { FooterPendingDecisionCard } from '@/components/footer/PendingDecisionCard';
 import { FooterReviewActionsBar } from '@/components/footer/ReviewActionsBar';
 import { FooterSubmitControl } from '@/components/footer/SubmitControl';
+import { RegexModeInput } from '@/components/footer/inputs/RegexModeInput';
+import { TextModeInput } from '@/components/footer/inputs/TextModeInput';
 import { useSavePresetCommand } from '@/hooks/useSavePresetCommand';
 import { useSlashPresetMenu } from '@/hooks/useSlashPresetMenu';
 import {
+  getFooterInputVariant,
   getModeSubmitInput,
   MODES,
   resolveFooterReviewKind,
@@ -162,6 +163,7 @@ export function AppFooter({
   const savePreset = useSavePresetCommand({ inputRef, addPreset, showToast });
   const isDisabled = isRenaming || isApplying || isUndoing;
   const strategyUi = MODES[mode].meta.ui;
+  const inputVariant = getFooterInputVariant(mode);
   const canSubmit = getModeSubmitInput(mode, { instruction, findPattern });
   const reviewKind = resolveFooterReviewKind({ mode, aiSession, isReviewMode, pendingDecision });
   const disableSubmitForReview = shouldDisableSubmitForReview(mode, {
@@ -274,178 +276,47 @@ export function AppFooter({
               strategyUi?.inputMinHeightClass ?? 'min-h-[44px]'
             )}
           >
-            {mode === 'regex' ? (
-              <div className="h-full flex flex-col">
-                {isAIAssistMode ? (
-                  <div className="h-full flex items-center px-4">
-                    <div className="relative flex-1">
-                      <input
-                        ref={aiAssistInputRef}
-                        type="text"
-                        placeholder="请描述您的正则需求 (例如: 删除所有括号内的内容)..."
-                        value={aiAssistText}
-                        onChange={(e) => setAiAssistText(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Escape') {
-                            e.preventDefault();
-                            aiAssistRequestIdRef.current += 1;
-                            setIsAIAssistLoading(false);
-                            setIsAIAssistMode(false);
-                            setAiAssistText('');
-                            return;
-                          }
-                          if (e.key === 'Enter') {
-                            e.preventDefault();
-                            submitAIAssist();
-                          }
-                        }}
-                        disabled={isEmpty || isDisabled || isAIAssistLoading}
-                        className={cn(
-                          'w-full px-0 pr-12 py-3 bg-transparent border-0 outline-none',
-                          'text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500',
-                          'font-mono text-sm'
-                        )}
-                      />
-
-                      <button
-                        type="button"
-                        onClick={submitAIAssist}
-                        disabled={isEmpty || isDisabled || isAIAssistLoading}
-                        className={cn(
-                          'absolute right-0 top-1/2 -translate-y-1/2',
-                          'p-1 rounded-md',
-                          'text-zinc-400 hover:text-amber-500 hover:bg-amber-50',
-                          'dark:text-zinc-500 dark:hover:text-amber-400 dark:hover:bg-amber-950/30',
-                          'disabled:opacity-40 disabled:pointer-events-none'
-                        )}
-                        title={isAIAssistLoading ? 'AI 生成中...' : '生成正则'}
-                      >
-                        {isAIAssistLoading ? (
-                          <LoaderIcon className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <Sparkles className="h-4 w-4" />
-                        )}
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <>
-                    <div className="relative flex-1">
-                      <input
-                        ref={findInputRef}
-                        type="text"
-                        placeholder="查找正则..."
-                        value={findPattern}
-                        onChange={(e) => onFindPatternChange(e.target.value)}
-                        disabled={isEmpty || isDisabled}
-                        className={cn(
-                          'w-full h-full px-4 pr-12 py-2.5 bg-transparent border-0 outline-none',
-                          'text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500',
-                          'font-mono text-sm'
-                        )}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setIsAIAssistMode(true);
-                          setAiAssistText('');
-                        }}
-                        disabled={isEmpty || isDisabled || isAIAssistLoading}
-                        className={cn(
-                          'absolute right-3 top-1/2 -translate-y-1/2',
-                          'p-1 rounded-md',
-                          'text-zinc-400 hover:text-amber-500 hover:bg-amber-50',
-                          'dark:text-zinc-500 dark:hover:text-amber-400 dark:hover:bg-amber-950/30',
-                          'disabled:opacity-40 disabled:pointer-events-none'
-                        )}
-                        title="AI 辅助生成正则"
-                      >
-                        <Sparkles className="h-4 w-4" />
-                      </button>
-                    </div>
-                    <div className="border-t border-zinc-200/50 dark:border-zinc-700/50 mx-4" />
-                    <input
-                      type="text"
-                      placeholder="替换为... (支持 ${i} ${i0} 序号)"
-                      value={replacePattern}
-                      onChange={(e) => onReplacePatternChange(e.target.value)}
-                      disabled={isEmpty || isDisabled}
-                      className={cn(
-                        'flex-1 px-4 py-2.5 bg-transparent border-0 outline-none',
-                        'text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500',
-                        'font-mono text-sm'
-                      )}
-                    />
-                  </>
-                )}
-              </div>
+            {inputVariant === 'regex' ? (
+              <RegexModeInput
+                isAIAssistMode={isAIAssistMode}
+                aiAssistText={aiAssistText}
+                isAIAssistLoading={isAIAssistLoading}
+                isDisabled={isDisabled}
+                isEmpty={isEmpty}
+                findPattern={findPattern}
+                replacePattern={replacePattern}
+                aiAssistInputRef={aiAssistInputRef}
+                findInputRef={findInputRef}
+                onAiAssistTextChange={setAiAssistText}
+                onFindPatternChange={onFindPatternChange}
+                onReplacePatternChange={onReplacePatternChange}
+                onSubmitAIAssist={submitAIAssist}
+                onOpenAIAssist={() => {
+                  setIsAIAssistMode(true);
+                  setAiAssistText('');
+                }}
+                onEscapeAIAssist={() => {
+                  aiAssistRequestIdRef.current += 1;
+                  setIsAIAssistLoading(false);
+                  setIsAIAssistMode(false);
+                  setAiAssistText('');
+                }}
+              />
             ) : (
-              <>
-                {slashMenu.isOpen && (
-                  <CommandMenu
-                    presets={slashMenu.filteredPresets}
-                    selectedIndex={slashMenu.safeSelectedIndex}
-                    onSelect={slashMenu.handleSelect}
-                    query={instruction.startsWith('/') ? instruction.slice(1) : ''}
-                  />
-                )}
-                <div className="h-full flex items-center">
-                  <TextareaAutosize
-                    ref={inputRef}
-                    placeholder={
-                      isReviewMode
-                        ? '不满意？修改指令后按回车重新生成...'
-                        : '输入自然语言指令... 或 / 选择预设'
-                    }
-                    value={instruction}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      if (
-                        savePreset.maybeOpenFromText(val, onInstructionChange, {
-                          onBeforeBegin: slashMenu.close
-                        })
-                      ) {
-                        return;
-                      }
-                      onInstructionChange(val);
-                      slashMenu.setOpenForText(val);
-                    }}
-                    onKeyDown={(e) => {
-                      if (slashMenu.handleKeyDown(e)) return;
-                      if (e.nativeEvent.isComposing) return;
-
-                      if (e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
-                        e.preventDefault();
-                        if (
-                          savePreset.maybeOpenFromInstruction(instruction, onInstructionChange, {
-                            onBeforeBegin: slashMenu.close
-                          })
-                        ) {
-                          return;
-                        }
-                        if (instruction.trim()) onGenerate();
-                      }
-                      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                        e.preventDefault();
-                        if (aiSession === 'review') onConfirmDecision();
-                      }
-                      if (e.key === 'Escape') {
-                        e.preventDefault();
-                        if (aiSession === 'review') onDiscardDecision();
-                      }
-                    }}
-                    disabled={isEmpty || isDisabled}
-                    className={cn(
-                      'flex-1 min-w-0 pl-4 pr-4 py-2.5 leading-6 bg-transparent border-0 outline-none',
-                      'resize-none overflow-y-auto overflow-x-hidden break-words',
-                      'text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500',
-                      'text-sm'
-                    )}
-                    minRows={1}
-                    maxRows={6}
-                  />
-                </div>
-              </>
+              <TextModeInput
+                isReviewMode={isReviewMode}
+                instruction={instruction}
+                inputRef={inputRef}
+                isEmpty={isEmpty}
+                isDisabled={isDisabled}
+                aiSession={aiSession}
+                slashMenu={slashMenu}
+                savePreset={savePreset}
+                onInstructionChange={onInstructionChange}
+                onGenerate={onGenerate}
+                onConfirmDecision={onConfirmDecision}
+                onDiscardDecision={onDiscardDecision}
+              />
             )}
           </div>
 

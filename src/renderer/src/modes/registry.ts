@@ -61,6 +61,10 @@ export function shouldDisableSubmitForReview(
   return values.isReviewMode && (mode === 'regex' || values.instruction.trim().length === 0);
 }
 
+export function getFooterInputVariant(mode: RenameStrategyId): 'regex' | 'text' {
+  return mode === 'regex' ? 'regex' : 'text';
+}
+
 type StrategyRunResult =
   | { ok: true; files: FileItem[] }
   | {
