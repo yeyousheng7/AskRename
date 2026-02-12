@@ -230,7 +230,7 @@ export function AppFooter({
         )}
 
         {/* Action Card - 智能模式下的 AI 决策预览卡片 */}
-        {aiSession === 'review' && mode === 'auto' && pendingDecision && (
+        {aiSession === 'review' && mode === 'smart' && pendingDecision && (
           <FooterPendingDecisionCard
             pendingDecision={pendingDecision}
             isApplying={isApplying}
@@ -251,7 +251,7 @@ export function AppFooter({
           />
         )}
 
-        {isReviewMode && (mode === 'regex' || (mode === 'auto' && aiSession !== 'review')) && (
+        {isReviewMode && (mode === 'regex' || (mode === 'smart' && aiSession !== 'review')) && (
           <FooterReviewActionsBar
             isApplying={isApplying}
             isUndoing={isUndoing}

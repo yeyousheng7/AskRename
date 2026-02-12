@@ -1,1 +1,1 @@
-export type Mode = 'auto' | 'ai' | 'regex';
+export type Mode = 'smart' | 'ai' | 'regex';

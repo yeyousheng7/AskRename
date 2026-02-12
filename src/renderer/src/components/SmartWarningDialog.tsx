@@ -57,7 +57,7 @@ export function SmartWarningDialog({
               <Button
                 variant="secondary"
                 onClick={() => {
-                  onSwitchMode('auto');
+                  onSwitchMode('smart');
                   onClose();
                 }}
               >

@@ -24,6 +24,8 @@ import { generateAutoDecision, getConfigFromEnv } from '@/lib/ai-service';
 import { generateRegexFromDescription } from '@/lib/regex-assist';
 import { batchApplyMagicRegex } from '@/lib/magic-regex';
 import { cn } from '@/lib/utils';
+import { MODES } from '@/modes/registry';
+import type { AnyRenameStrategy } from '@renderer/types/types';
 import type { AISessionState, PendingDecision } from '@/types/ai';
 import type { Mode } from '@/types/mode';
 import type { SettingsTabId } from '@/types/settings';
@@ -40,8 +42,8 @@ const PAGINATION_THRESHOLD = 100;
 const DEFAULT_PAGE_SIZE = 50;
 
 function App(): React.JSX.Element {
-  // 模式状态：auto(智能) | ai(纯AI) | regex(纯正则)
-  const [mode, setMode] = useState<Mode>('auto');
+  // 模式状态：smart(智能) | ai(纯AI) | regex(纯正则)
+  const [mode, setMode] = useState<Mode>('smart');
 
   // AI Session 状态：智能模式下的会话状态机
   const [aiSession, setAISession] = useState<AISessionState>('idle');
@@ -111,7 +113,7 @@ function App(): React.JSX.Element {
 
   // 是否处于审查模式（有待应用的更改）
   const isReviewMode = hasChanges && !isRenaming && batchAI.status === 'idle';
-  const isAutoDecisionLoading = mode === 'auto' && aiSession === 'loading';
+  const isSmartDecisionLoading = mode === 'smart' && aiSession === 'loading';
 
   const filesRef = useRef(files);
   useEffect(() => {
@@ -372,8 +374,8 @@ function App(): React.JSX.Element {
     await doRename(snapshot);
   }, [mode, isRenaming, batchAI.status, files.length, instruction, doRename]);
 
-  // Auto 模式：AI 决策引擎
-  const handleAutoRename = useCallback(async () => {
+  // Smart 模式：AI 决策引擎
+  const handleSmartRename = useCallback(async () => {
     if (
       aiSession === 'loading' ||
       batchAI.status === 'processing' ||
@@ -404,7 +406,7 @@ function App(): React.JSX.Element {
     addToHistory(instruction);
 
     // 立即反馈：清空输入框，设置 loading 状态
-    const requestId = `auto:decision:${Date.now()}:${Math.random().toString(16).slice(2)}`;
+    const requestId = `smart:decision:${Date.now()}:${Math.random().toString(16).slice(2)}`;
     autoDecisionRequestIdRef.current = requestId;
     setAISession('loading');
     setInstruction('');
@@ -476,7 +478,7 @@ function App(): React.JSX.Element {
       const message = err instanceof Error ? err.message : 'AI 决策失败，请重试';
       setError(message);
       setAISession('idle');
-      console.error('Auto rename failed:', err);
+      console.error('Smart rename failed:', err);
     }
   }, [
     instruction,
@@ -489,6 +491,50 @@ function App(): React.JSX.Element {
     batchUpdateFileNames,
     addToHistory,
     updateFileName
+  ]);
+
+  const handleGenerateByStrategy = useCallback(async () => {
+    const strategy = MODES[mode] as AnyRenameStrategy | undefined;
+    if (!strategy) return;
+
+    if (mode === 'regex') {
+      const validation = strategy.validate?.({ findPattern, replacePattern });
+      if (validation && !validation.valid) {
+        showToast(validation.error || '参数无效', 'error');
+        return;
+      }
+
+      const nextFiles = await strategy.execute(files, { findPattern, replacePattern });
+      const nextNames = nextFiles.map((f) => f.renamed);
+      batchUpdateFileNames(nextNames, 'rule');
+      return;
+    }
+
+    const validation = strategy.validate?.({ instruction });
+    if (validation && !validation.valid) {
+      showToast(validation.error || '参数无效', 'error');
+      return;
+    }
+
+    const handlers: Record<Exclude<Mode, 'regex'>, () => Promise<void>> = {
+      smart: handleSmartRename,
+      ai: handleRename
+    };
+
+    await strategy.execute(files, {
+      instruction,
+      runner: handlers[mode as Exclude<Mode, 'regex'>]
+    });
+  }, [
+    mode,
+    findPattern,
+    replacePattern,
+    showToast,
+    files,
+    batchUpdateFileNames,
+    instruction,
+    handleSmartRename,
+    handleRename
   ]);
 
   // 放弃 AI 决策
@@ -776,10 +822,10 @@ function App(): React.JSX.Element {
               onRemove={removeFile}
               reorderFiles={reorderFiles}
               onAfterReorder={handleAfterReorder}
-              isLoading={isRenaming || isAutoDecisionLoading}
+              isLoading={isRenaming || isSmartDecisionLoading}
               isDisabled={
                 isRenaming ||
-                isAutoDecisionLoading ||
+                isSmartDecisionLoading ||
                 isApplying ||
                 isUndoing ||
                 batchAI.status === 'processing'
@@ -833,7 +879,7 @@ function App(): React.JSX.Element {
           }
           stopRenaming();
         }}
-        onGenerate={() => void (mode === 'auto' ? handleAutoRename() : handleRename())}
+        onGenerate={() => void handleGenerateByStrategy()}
         showToast={showToast}
         history={history}
         onSelectHistory={handleSelectHistory}

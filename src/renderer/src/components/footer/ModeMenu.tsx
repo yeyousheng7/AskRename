@@ -1,35 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDownIcon, Regex, SparklesIcon, Zap } from 'lucide-react';
+import { ChevronDownIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Mode } from '@/types/mode';
-
-interface ModeConfig {
-  id: Mode;
-  icon: React.ReactNode;
-  label: string;
-  description: string;
-}
-
-const MODES: ModeConfig[] = [
-  {
-    id: 'auto',
-    icon: <Zap className="h-4 w-4" />,
-    label: '智能',
-    description: 'AI 自动判断使用正则或完整生成'
-  },
-  {
-    id: 'ai',
-    icon: <SparklesIcon className="h-4 w-4" />,
-    label: 'AI',
-    description: '始终使用 AI 生成文件名'
-  },
-  {
-    id: 'regex',
-    icon: <Regex className="h-4 w-4" />,
-    label: '正则',
-    description: '手动输入正则表达式'
-  }
-];
+import { getModeList } from '@/modes/registry';
 
 export function FooterModeMenu({
   mode,
@@ -40,6 +13,7 @@ export function FooterModeMenu({
   onModeChange: (mode: Mode) => void;
   disabled: boolean;
 }): React.JSX.Element {
+  const modeList = useMemo(() => getModeList(), []);
   const [isOpen, setIsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -53,7 +27,11 @@ export function FooterModeMenu({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const currentMode = useMemo(() => MODES.find((m) => m.id === mode) ?? MODES[0], [mode]);
+  const currentMode = useMemo(
+    () => modeList.find((m) => m.id === mode) ?? modeList[0],
+    [mode, modeList]
+  );
+  const CurrentModeIcon = currentMode.meta.icon;
 
   return (
     <div className="relative" ref={menuRef}>
@@ -68,8 +46,8 @@ export function FooterModeMenu({
           disabled && 'opacity-50 cursor-not-allowed'
         )}
       >
-        {currentMode.icon}
-        <span className="text-sm font-medium">{currentMode.label}</span>
+        <CurrentModeIcon className="h-4 w-4" />
+        <span className="text-sm font-medium">{currentMode.meta.label}</span>
         <ChevronDownIcon
           className={cn('h-3.5 w-3.5 transition-transform duration-200', isOpen && 'rotate-180')}
         />
@@ -87,44 +65,49 @@ export function FooterModeMenu({
             'animate-in fade-in-0 zoom-in-95 duration-150'
           )}
         >
-          {MODES.map((m) => (
-            <button
-              key={m.id}
-              onClick={() => {
-                onModeChange(m.id);
-                setIsOpen(false);
-              }}
-              className={cn(
-                'w-full px-3 py-2.5 flex items-start gap-3 text-left',
-                'hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors',
-                mode === m.id && 'bg-zinc-50 dark:bg-zinc-800'
-              )}
-            >
-              <div
+          {modeList.map((m) => {
+            const Icon = m.meta.icon;
+            return (
+              <button
+                key={m.id}
+                onClick={() => {
+                  onModeChange(m.id);
+                  setIsOpen(false);
+                }}
                 className={cn(
-                  'mt-0.5',
-                  mode === m.id
-                    ? 'text-zinc-900 dark:text-zinc-100'
-                    : 'text-zinc-400 dark:text-zinc-500'
+                  'w-full px-3 py-2.5 flex items-start gap-3 text-left',
+                  'hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors',
+                  mode === m.id && 'bg-zinc-50 dark:bg-zinc-800'
                 )}
               >
-                {m.icon}
-              </div>
-              <div>
                 <div
                   className={cn(
-                    'text-sm font-medium',
+                    'mt-0.5',
                     mode === m.id
                       ? 'text-zinc-900 dark:text-zinc-100'
-                      : 'text-zinc-700 dark:text-zinc-300'
+                      : 'text-zinc-400 dark:text-zinc-500'
                   )}
                 >
-                  {m.label}
+                  <Icon className="h-4 w-4" />
                 </div>
-                <div className="text-xs text-zinc-500 dark:text-zinc-400">{m.description}</div>
-              </div>
-            </button>
-          ))}
+                <div>
+                  <div
+                    className={cn(
+                      'text-sm font-medium',
+                      mode === m.id
+                        ? 'text-zinc-900 dark:text-zinc-100'
+                        : 'text-zinc-700 dark:text-zinc-300'
+                    )}
+                  >
+                    {m.meta.label}
+                  </div>
+                  <div className="text-xs text-zinc-500 dark:text-zinc-400">
+                    {m.meta.description}
+                  </div>
+                </div>
+              </button>
+            );
+          })}
         </div>
       )}
     </div>
