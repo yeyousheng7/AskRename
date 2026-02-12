@@ -21,6 +21,7 @@ import { useEvent } from '@/hooks/useEvent';
 import { useBatchAI } from '@/hooks/useBatchAI';
 import { electronApi } from '@/lib/electron-api';
 import { generateAutoDecision, getConfigFromEnv } from '@/lib/ai-service';
+import { generateRegexFromDescription } from '@/lib/regex-assist';
 import { batchApplyMagicRegex } from '@/lib/magic-regex';
 import { cn } from '@/lib/utils';
 import { MODES } from '@/modes/registry';
@@ -61,6 +62,7 @@ function App(): React.JSX.Element {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const settingsOpenTimerRef = useRef<number | null>(null);
   const [settingsForcedTab, setSettingsForcedTab] = useState<SettingsTabId | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const { resolvedTheme, toggleTheme } = useTheme();
   const { settings, updateSettings } = useSettings();
@@ -95,6 +97,7 @@ function App(): React.JSX.Element {
     scanDepthRecursive,
     closeScanDepthDialog,
     startRenaming,
+    stopRenaming,
     applyRename,
     resetAfterApply,
     undo
@@ -546,24 +549,6 @@ function App(): React.JSX.Element {
     ]
   );
 
-  const handleStrategyCommit = useCallback(
-    (params: unknown) => {
-      if (mode === 'regex') {
-        if (params && typeof params === 'object' && 'findPattern' in params) {
-          const next = params as { findPattern: string; replacePattern: string };
-          setFindPattern(next.findPattern);
-          setReplacePattern(next.replacePattern);
-        }
-      } else if (params && typeof params === 'object' && 'instruction' in params) {
-        const next = params as { instruction: string };
-        setInstruction(next.instruction);
-      }
-
-      void handleGenerateByStrategy(params);
-    },
-    [mode, handleGenerateByStrategy]
-  );
-
   // 放弃 AI 决策
   const handleDiscardDecision = useCallback(() => {
     if (aiSession !== 'review') return;
@@ -641,7 +626,52 @@ function App(): React.JSX.Element {
   // 历史记录选择：回填到策略上下文
   const handleSelectHistory = useCallback((text: string) => {
     setInstruction(text);
+    setTimeout(() => inputRef.current?.focus(), 50);
   }, []);
+
+  const handleGenerateRegexAssist = useCallback(
+    async (requirement: string): Promise<{ find: string; replace: string }> => {
+      let apiKeyToUse = settings.apiKey.trim();
+
+      if (settings.provider !== 'ollama' && !apiKeyToUse) {
+        try {
+          apiKeyToUse = ((await electronApi.getApiKey(settings.provider)) || '').trim();
+        } catch (err) {
+          console.error('Failed to load api key:', err);
+        }
+
+        if (!apiKeyToUse) {
+          promptConfigureApiKey();
+          throw new Error('请先配置 API Key 以继续');
+        }
+
+        updateSettings({ apiKey: apiKeyToUse });
+      }
+
+      const baseURL = settings.baseUrl.trim();
+      const model = settings.model.trim();
+      if (!baseURL) throw new Error('API Base URL 未配置');
+      if (!model) throw new Error('模型名称未配置');
+
+      const envCfg = getConfigFromEnv();
+      return generateRegexFromDescription(requirement, {
+        provider: settings.provider,
+        apiKey: apiKeyToUse,
+        baseURL,
+        model,
+        jsonMode: envCfg.jsonMode,
+        maxTokens: envCfg.maxTokens
+      });
+    },
+    [
+      settings.apiKey,
+      settings.baseUrl,
+      settings.model,
+      settings.provider,
+      promptConfigureApiKey,
+      updateSettings
+    ]
+  );
 
   const { isDragging, rootProps } = useFileDragOverlay(handleDrop);
 
@@ -822,7 +852,10 @@ function App(): React.JSX.Element {
         mode={mode}
         onModeChange={handleModeChange}
         error={error}
-        files={files}
+        instruction={instruction}
+        findPattern={findPattern}
+        replacePattern={replacePattern}
+        inputRef={inputRef}
         isEmpty={isEmpty}
         isReviewMode={isReviewMode}
         isRenaming={isRenaming || batchAI.status === 'processing'}
@@ -834,10 +867,32 @@ function App(): React.JSX.Element {
         onConfirmDecision={() => void handleConfirmDecision()}
         onDiscardDecision={handleDiscardDecision}
         onUpdatePendingRegex={handleUpdatePendingRegex}
-        onStrategyCommit={handleStrategyCommit}
+        onGenerateRegexAssist={handleGenerateRegexAssist}
+        onInstructionChange={(next) => setInstruction(next)}
+        onFindPatternChange={(next) => setFindPattern(next)}
+        onReplacePatternChange={(next) => setReplacePattern(next)}
         onUndo={() => void handleUndoEvent()}
         onDiscard={handleDiscard}
         onApply={() => void handleApply()}
+        onStop={() => {
+          if (batchAI.status === 'processing') {
+            batchAI.cancel();
+            showToast('已取消任务', 'success');
+            return;
+          }
+          const autoDecisionRequestId = autoDecisionRequestIdRef.current;
+          if (aiSession === 'loading' && autoDecisionRequestId) {
+            autoDecisionRequestIdRef.current = null;
+            void electronApi.cancelAI(autoDecisionRequestId).catch(() => undefined);
+            setAISession('idle');
+            setPendingDecision(null);
+            showToast('已取消生成', 'success');
+            return;
+          }
+          stopRenaming();
+        }}
+        onGenerate={() => void handleGenerateByStrategy()}
+        showToast={showToast}
         history={history}
         onSelectHistory={handleSelectHistory}
       />
