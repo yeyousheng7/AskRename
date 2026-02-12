@@ -22,9 +22,12 @@ import { useBatchAI } from '@/hooks/useBatchAI';
 import { electronApi } from '@/lib/electron-api';
 import { generateAutoDecision, getConfigFromEnv } from '@/lib/ai-service';
 import { generateRegexFromDescription } from '@/lib/regex-assist';
-import { batchApplyMagicRegex } from '@/lib/magic-regex';
 import { cn } from '@/lib/utils';
-import { executeModeStrategy } from '@/modes/registry';
+import {
+  computeRegexPreviewNames,
+  executeModeStrategy,
+  resolveReorderMagicPreview
+} from '@/modes/registry';
 import type { AISessionState, PendingDecision } from '@/types/ai';
 import type { Mode } from '@/types/mode';
 import type { SettingsTabId } from '@/types/settings';
@@ -33,10 +36,6 @@ import type { RegexSubmitParams, TextSubmitParams } from '@renderer/types/types'
 // ============================================================================
 // App 主组件
 // ============================================================================
-
-function hasMagicIndexVars(text: string): boolean {
-  return /\$\{i(?:0|00|000)?\}/.test(text);
-}
 
 const PAGINATION_THRESHOLD = 100;
 const DEFAULT_PAGE_SIZE = 50;
@@ -53,6 +52,9 @@ function App(): React.JSX.Element {
 
   // AI 模式状态
   const [instruction, setInstruction] = useState('');
+  const [isLargeAiWarningOpen, setIsLargeAiWarningOpen] = useState(false);
+  const [pendingAiContinue, setPendingAiContinue] = useState<(() => void) | null>(null);
+  const [pendingAiInstructionSnapshot, setPendingAiInstructionSnapshot] = useState('');
 
   // 正则模式状态
   const [findPattern, setFindPattern] = useState('');
@@ -131,7 +133,7 @@ function App(): React.JSX.Element {
     if (currentFiles.length === 0) return;
 
     const filenames = currentFiles.map((f) => f.original);
-    const newNames = batchApplyMagicRegex(filenames, findPattern, replacePattern);
+    const newNames = computeRegexPreviewNames(filenames, { findPattern, replacePattern });
 
     batchUpdateFileNames(newNames, 'rule');
   }, [mode, findPattern, replacePattern, stableOriginalNamesKey, batchUpdateFileNames]);
@@ -142,26 +144,15 @@ function App(): React.JSX.Element {
   }, []);
 
   const recomputeIfMagicEnabledAfterReorder = useCallback(() => {
-    if (files.length === 0) return;
-
-    if (mode === 'regex') {
-      if (!hasMagicIndexVars(replacePattern)) return;
-      const originals = files.map((f) => f.original);
-      const newNames = batchApplyMagicRegex(originals, findPattern, replacePattern);
-      batchUpdateFileNames(newNames, 'rule');
-      return;
-    }
-
-    if (aiSession === 'review' && pendingDecision?.type === 'regex') {
-      if (!hasMagicIndexVars(pendingDecision.replace)) return;
-      const originals = files.map((f) => f.original);
-      const newNames = batchApplyMagicRegex(
-        originals,
-        pendingDecision.find,
-        pendingDecision.replace
-      );
-      batchUpdateFileNames(newNames, pendingRegexOrigin);
-    }
+    const preview = resolveReorderMagicPreview(mode, files, {
+      findPattern,
+      replacePattern,
+      aiSession,
+      pendingDecision,
+      pendingRegexOrigin
+    });
+    if (!preview) return;
+    batchUpdateFileNames(preview.names, preview.origin);
   }, [
     files,
     mode,
@@ -190,8 +181,8 @@ function App(): React.JSX.Element {
       }
 
       // 切换时清空输入并重置预览
-      pendingAiContinueRef.current = null;
-      pendingAiInstructionSnapshotRef.current = '';
+      setPendingAiContinue(null);
+      setPendingAiInstructionSnapshot('');
       setAISession('idle');
       setPendingDecision(null);
       setPendingRegexOrigin('ai');
@@ -261,9 +252,33 @@ function App(): React.JSX.Element {
   }, [aiSession, canUndo, discardChanges, hasChanges, isUndoing, undo, showToast]);
   const handleUndoEvent = useEvent(handleUndo);
 
-  const [isLargeAiWarningOpen, setIsLargeAiWarningOpen] = useState(false);
-  const pendingAiContinueRef = useRef<(() => void) | null>(null);
-  const pendingAiInstructionSnapshotRef = useRef<string>('');
+  const resolveApiKey = useCallback(async (): Promise<string | null> => {
+    const localApiKey = settings.apiKey.trim();
+    if (settings.provider === 'ollama') return localApiKey;
+    if (localApiKey) return localApiKey;
+
+    try {
+      const saved = ((await electronApi.getApiKey(settings.provider)) || '').trim();
+      if (!saved) {
+        promptConfigureApiKey();
+        return null;
+      }
+      updateSettings({ apiKey: saved });
+      return saved;
+    } catch (err) {
+      console.error('Failed to load api key:', err);
+      promptConfigureApiKey();
+      return null;
+    }
+  }, [settings.apiKey, settings.provider, promptConfigureApiKey, updateSettings]);
+
+  const resolveModelSettings = useCallback(() => {
+    const baseURL = settings.baseUrl.trim();
+    const model = settings.model.trim();
+    if (!baseURL) throw new Error('API Base URL 未配置');
+    if (!model) throw new Error('模型名称未配置');
+    return { baseURL, model };
+  }, [settings.baseUrl, settings.model]);
 
   // AI 生成处理
   const doRename = useCallback(
@@ -279,38 +294,22 @@ function App(): React.JSX.Element {
         return;
       }
 
-      let apiKeyToUse = settings.apiKey.trim();
-      if (settings.provider !== 'ollama' && !apiKeyToUse) {
-        try {
-          apiKeyToUse = ((await electronApi.getApiKey(settings.provider)) || '').trim();
-        } catch (err) {
-          console.error('Failed to load api key:', err);
-        }
-
-        if (!apiKeyToUse) {
-          promptConfigureApiKey();
-          return;
-        }
-
-        updateSettings({ apiKey: apiKeyToUse });
-      }
+      const apiKeyToUse = await resolveApiKey();
+      if (!apiKeyToUse && settings.provider !== 'ollama') return;
 
       setError(null);
       addToHistory(trimmedInstruction);
       try {
         if (files.length > 20) {
           const envCfg = getConfigFromEnv();
-          const baseURL = settings.baseUrl.trim();
-          const model = settings.model.trim();
-          if (!baseURL) throw new Error('API Base URL 未配置');
-          if (!model) throw new Error('模型名称未配置');
+          const { baseURL, model } = resolveModelSettings();
 
           batchAI.start({
             items: files.map((f) => ({ id: f.id, original: f.original })),
             instruction: trimmedInstruction,
             settings: {
               provider: settings.provider,
-              apiKey: apiKeyToUse,
+              apiKey: apiKeyToUse ?? '',
               baseURL,
               model,
               jsonMode: envCfg.jsonMode,
@@ -323,7 +322,7 @@ function App(): React.JSX.Element {
         } else {
           await startRenaming(trimmedInstruction, {
             provider: settings.provider,
-            apiKey: apiKeyToUse,
+            apiKey: apiKeyToUse ?? undefined,
             baseURL: settings.baseUrl,
             model: settings.model
           });
@@ -339,10 +338,10 @@ function App(): React.JSX.Element {
       isRenaming,
       batchAI,
       files,
-      promptConfigureApiKey,
       settings,
       startRenaming,
-      updateSettings,
+      resolveApiKey,
+      resolveModelSettings,
       addToHistory,
       updateFileName
     ]
@@ -362,8 +361,8 @@ function App(): React.JSX.Element {
     const snapshot = instruction;
 
     if (files.length > 50) {
-      pendingAiInstructionSnapshotRef.current = snapshot;
-      pendingAiContinueRef.current = () => void doRename(snapshot);
+      setPendingAiInstructionSnapshot(snapshot);
+      setPendingAiContinue(() => () => void doRename(snapshot));
       setInstruction('');
       setIsLargeAiWarningOpen(true);
       return;
@@ -384,22 +383,8 @@ function App(): React.JSX.Element {
       return;
     }
 
-    // 获取 API Key
-    let apiKeyToUse = settings.apiKey.trim();
-    if (settings.provider !== 'ollama' && !apiKeyToUse) {
-      try {
-        apiKeyToUse = ((await electronApi.getApiKey(settings.provider)) || '').trim();
-      } catch (err) {
-        console.error('Failed to load api key:', err);
-      }
-
-      if (!apiKeyToUse) {
-        promptConfigureApiKey();
-        return;
-      }
-
-      updateSettings({ apiKey: apiKeyToUse });
-    }
+    const apiKeyToUse = await resolveApiKey();
+    if (!apiKeyToUse && settings.provider !== 'ollama') return;
 
     // 记录指令到历史（在清空前）
     addToHistory(instruction);
@@ -419,7 +404,7 @@ function App(): React.JSX.Element {
         instruction,
         {
           provider: settings.provider,
-          apiKey: apiKeyToUse,
+          apiKey: apiKeyToUse ?? undefined,
           baseURL: settings.baseUrl,
           model: settings.model
         },
@@ -434,7 +419,10 @@ function App(): React.JSX.Element {
         setPendingDecision(decision);
         setPendingRegexOrigin('ai');
         // 应用正则预览
-        const newNames = batchApplyMagicRegex(fileNames, decision.find, decision.replace);
+        const newNames = computeRegexPreviewNames(fileNames, {
+          findPattern: decision.find,
+          replacePattern: decision.replace
+        });
         batchUpdateFileNames(newNames, 'ai');
         setAISession('review');
       } else {
@@ -444,17 +432,14 @@ function App(): React.JSX.Element {
           setAISession('idle');
 
           const envCfg = getConfigFromEnv();
-          const baseURL = settings.baseUrl.trim();
-          const model = settings.model.trim();
-          if (!baseURL) throw new Error('API Base URL 未配置');
-          if (!model) throw new Error('模型名称未配置');
+          const { baseURL, model } = resolveModelSettings();
 
           batchAI.start({
             items: files.map((f) => ({ id: f.id, original: f.original })),
             instruction,
             settings: {
               provider: settings.provider,
-              apiKey: apiKeyToUse,
+              apiKey: apiKeyToUse ?? '',
               baseURL,
               model,
               jsonMode: envCfg.jsonMode,
@@ -484,9 +469,9 @@ function App(): React.JSX.Element {
     aiSession,
     batchAI,
     files,
-    promptConfigureApiKey,
     settings,
-    updateSettings,
+    resolveApiKey,
+    resolveModelSettings,
     batchUpdateFileNames,
     addToHistory,
     updateFileName
@@ -555,7 +540,10 @@ function App(): React.JSX.Element {
       setPendingRegexOrigin('rule');
       // 实时预览
       const fileNames = files.map((f) => f.original);
-      const newNames = batchApplyMagicRegex(fileNames, find, replace);
+      const newNames = computeRegexPreviewNames(fileNames, {
+        findPattern: find,
+        replacePattern: replace
+      });
       batchUpdateFileNames(newNames, 'rule');
     },
     [pendingDecision, files, batchUpdateFileNames]
@@ -621,46 +609,24 @@ function App(): React.JSX.Element {
 
   const handleGenerateRegexAssist = useCallback(
     async (requirement: string): Promise<{ find: string; replace: string }> => {
-      let apiKeyToUse = settings.apiKey.trim();
-
-      if (settings.provider !== 'ollama' && !apiKeyToUse) {
-        try {
-          apiKeyToUse = ((await electronApi.getApiKey(settings.provider)) || '').trim();
-        } catch (err) {
-          console.error('Failed to load api key:', err);
-        }
-
-        if (!apiKeyToUse) {
-          promptConfigureApiKey();
-          throw new Error('请先配置 API Key 以继续');
-        }
-
-        updateSettings({ apiKey: apiKeyToUse });
+      const apiKeyToUse = await resolveApiKey();
+      if (!apiKeyToUse && settings.provider !== 'ollama') {
+        throw new Error('请先配置 API Key 以继续');
       }
 
-      const baseURL = settings.baseUrl.trim();
-      const model = settings.model.trim();
-      if (!baseURL) throw new Error('API Base URL 未配置');
-      if (!model) throw new Error('模型名称未配置');
+      const { baseURL, model } = resolveModelSettings();
 
       const envCfg = getConfigFromEnv();
       return generateRegexFromDescription(requirement, {
         provider: settings.provider,
-        apiKey: apiKeyToUse,
+        apiKey: apiKeyToUse ?? '',
         baseURL,
         model,
         jsonMode: envCfg.jsonMode,
         maxTokens: envCfg.maxTokens
       });
     },
-    [
-      settings.apiKey,
-      settings.baseUrl,
-      settings.model,
-      settings.provider,
-      promptConfigureApiKey,
-      updateSettings
-    ]
+    [settings.provider, resolveApiKey, resolveModelSettings]
   );
 
   const { isDragging, rootProps } = useFileDragOverlay(handleDrop);
@@ -672,10 +638,6 @@ function App(): React.JSX.Element {
   const clampedPageIndex = Math.min(pageIndex, pageCount - 1);
   const pageStart = clampedPageIndex * effectivePageSize;
   const pageFiles = isPagingEnabled ? files.slice(pageStart, pageStart + effectivePageSize) : files;
-
-  useEffect(() => {
-    if (clampedPageIndex !== pageIndex) setPageIndex(clampedPageIndex);
-  }, [clampedPageIndex, pageIndex]);
 
   const setEditingIndexWithPaging = useCallback(
     (next: number | null) => {
@@ -712,17 +674,17 @@ function App(): React.JSX.Element {
       <SmartWarningDialog
         open={isLargeAiWarningOpen}
         onClose={() => {
-          if (pendingAiInstructionSnapshotRef.current) {
-            setInstruction(pendingAiInstructionSnapshotRef.current);
-            pendingAiInstructionSnapshotRef.current = '';
+          if (pendingAiInstructionSnapshot) {
+            setInstruction(pendingAiInstructionSnapshot);
+            setPendingAiInstructionSnapshot('');
           }
-          pendingAiContinueRef.current = null;
+          setPendingAiContinue(null);
           setIsLargeAiWarningOpen(false);
         }}
         onContinue={() => {
-          const fn = pendingAiContinueRef.current;
-          pendingAiInstructionSnapshotRef.current = '';
-          pendingAiContinueRef.current = null;
+          const fn = pendingAiContinue;
+          setPendingAiInstructionSnapshot('');
+          setPendingAiContinue(null);
           setIsLargeAiWarningOpen(false);
           setInstruction('');
           fn?.();

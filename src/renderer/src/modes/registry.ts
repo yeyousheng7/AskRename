@@ -7,9 +7,11 @@ import type {
   TextSubmitParams
 } from '@renderer/types/types';
 import type { FileItem } from '@/types/file';
+import type { PendingDecision } from '@/types/ai';
 import { AIStrategy } from '@/modes/ai';
 import { RegexStrategy } from '@/modes/regex';
 import { SmartStrategy } from '@/modes/smart';
+import { batchApplyMagicRegex } from '@/lib/magic-regex';
 
 export const MODES = {
   smart: SmartStrategy,
@@ -63,6 +65,54 @@ export function shouldDisableSubmitForReview(
 
 export function getFooterInputVariant(mode: RenameStrategyId): 'regex' | 'text' {
   return mode === 'regex' ? 'regex' : 'text';
+}
+
+function hasMagicIndexVars(text: string): boolean {
+  return /\$\{i(?:0|00|000)?\}/.test(text);
+}
+
+export function computeRegexPreviewNames(originals: string[], params: RegexSubmitParams): string[] {
+  return batchApplyMagicRegex(originals, params.findPattern, params.replacePattern);
+}
+
+export function resolveReorderMagicPreview(
+  mode: RenameStrategyId,
+  files: FileItem[],
+  context: {
+    findPattern: string;
+    replacePattern: string;
+    aiSession: 'idle' | 'loading' | 'review';
+    pendingDecision: PendingDecision;
+    pendingRegexOrigin: 'ai' | 'rule';
+  }
+): { names: string[]; origin: 'ai' | 'rule' } | null {
+  if (files.length === 0) return null;
+
+  const originals = files.map((f) => f.original);
+
+  if (mode === 'regex') {
+    if (!hasMagicIndexVars(context.replacePattern)) return null;
+    return {
+      names: computeRegexPreviewNames(originals, {
+        findPattern: context.findPattern,
+        replacePattern: context.replacePattern
+      }),
+      origin: 'rule'
+    };
+  }
+
+  if (context.aiSession === 'review' && context.pendingDecision?.type === 'regex') {
+    if (!hasMagicIndexVars(context.pendingDecision.replace)) return null;
+    return {
+      names: computeRegexPreviewNames(originals, {
+        findPattern: context.pendingDecision.find,
+        replacePattern: context.pendingDecision.replace
+      }),
+      origin: context.pendingRegexOrigin
+    };
+  }
+
+  return null;
 }
 
 type StrategyRunResult =
