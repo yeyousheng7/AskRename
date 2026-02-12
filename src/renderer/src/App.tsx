@@ -46,6 +46,7 @@ function App(): React.JSX.Element {
   // AI Session 状态：智能模式下的会话状态机
   const [aiSession, setAISession] = useState<AISessionState>('idle');
   const [pendingDecision, setPendingDecision] = useState<PendingDecision>(null);
+  const [pendingRegexOrigin, setPendingRegexOrigin] = useState<'ai' | 'rule'>('ai');
   const autoDecisionRequestIdRef = useRef<string | null>(null);
 
   // AI 模式状态
@@ -131,7 +132,7 @@ function App(): React.JSX.Element {
     const filenames = currentFiles.map((f) => f.original);
     const newNames = batchApplyMagicRegex(filenames, findPattern, replacePattern);
 
-    batchUpdateFileNames(newNames);
+    batchUpdateFileNames(newNames, 'rule');
   }, [mode, findPattern, replacePattern, stableOriginalNamesKey, batchUpdateFileNames]);
 
   const [reorderNonce, setReorderNonce] = useState(0);
@@ -146,7 +147,7 @@ function App(): React.JSX.Element {
       if (!hasMagicIndexVars(replacePattern)) return;
       const originals = files.map((f) => f.original);
       const newNames = batchApplyMagicRegex(originals, findPattern, replacePattern);
-      batchUpdateFileNames(newNames);
+      batchUpdateFileNames(newNames, 'rule');
       return;
     }
 
@@ -158,9 +159,18 @@ function App(): React.JSX.Element {
         pendingDecision.find,
         pendingDecision.replace
       );
-      batchUpdateFileNames(newNames);
+      batchUpdateFileNames(newNames, pendingRegexOrigin);
     }
-  }, [files, mode, replacePattern, findPattern, batchUpdateFileNames, aiSession, pendingDecision]);
+  }, [
+    files,
+    mode,
+    replacePattern,
+    findPattern,
+    batchUpdateFileNames,
+    aiSession,
+    pendingDecision,
+    pendingRegexOrigin
+  ]);
 
   useEffect(() => {
     if (reorderNonce === 0) return;
@@ -183,6 +193,7 @@ function App(): React.JSX.Element {
       pendingAiInstructionSnapshotRef.current = '';
       setAISession('idle');
       setPendingDecision(null);
+      setPendingRegexOrigin('ai');
       setInstruction('');
       setFindPattern('');
       setReplacePattern('');
@@ -305,7 +316,7 @@ function App(): React.JSX.Element {
               maxTokens: envCfg.maxTokens
             },
             onBatchApplied: ({ items, resultNames }) => {
-              items.forEach((it, i) => updateFileName(it.id, resultNames[i] || ''));
+              items.forEach((it, i) => updateFileName(it.id, resultNames[i] || '', 'ai'));
             }
           });
         } else {
@@ -420,9 +431,10 @@ function App(): React.JSX.Element {
       if (decision.type === 'regex') {
         // AI 决定使用正则：【不切换模式】，存入 pendingDecision，应用预览
         setPendingDecision(decision);
+        setPendingRegexOrigin('ai');
         // 应用正则预览
         const newNames = batchApplyMagicRegex(fileNames, decision.find, decision.replace);
-        batchUpdateFileNames(newNames);
+        batchUpdateFileNames(newNames, 'ai');
         setAISession('review');
       } else {
         // AI 返回文件名列表
@@ -448,13 +460,13 @@ function App(): React.JSX.Element {
               maxTokens: envCfg.maxTokens
             },
             onBatchApplied: ({ items, resultNames }) => {
-              items.forEach((it, i) => updateFileName(it.id, resultNames[i] || ''));
+              items.forEach((it, i) => updateFileName(it.id, resultNames[i] || '', 'ai'));
             }
           });
         } else {
           // 文件数在样本范围内，直接使用返回结果
           setPendingDecision(decision);
-          batchUpdateFileNames(decision.names);
+          batchUpdateFileNames(decision.names, 'ai');
           setAISession('review');
         }
       }
@@ -492,10 +504,11 @@ function App(): React.JSX.Element {
     (find: string, replace: string) => {
       if (pendingDecision?.type !== 'regex') return;
       setPendingDecision({ type: 'regex', find, replace });
+      setPendingRegexOrigin('rule');
       // 实时预览
       const fileNames = files.map((f) => f.original);
       const newNames = batchApplyMagicRegex(fileNames, find, replace);
-      batchUpdateFileNames(newNames);
+      batchUpdateFileNames(newNames, 'rule');
     },
     [pendingDecision, files, batchUpdateFileNames]
   );

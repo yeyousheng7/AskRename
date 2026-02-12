@@ -95,10 +95,11 @@ export function PreferencesTab({
             />
             <span>
               <div className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
-                锁定文件后缀（扩展名）
+                保护文件扩展名
               </div>
               <div className={helpClass}>
-                开启时：新文件名无扩展名时自动补全原扩展名（例：photo.jpg → photo_1.jpg）。
+                如果文件存在扩展名，锁定扩展名，仅对 AI 自动建议生效。
+                人工干预规则（如修改正则）或手动重命名不受限制。
               </div>
             </span>
           </label>

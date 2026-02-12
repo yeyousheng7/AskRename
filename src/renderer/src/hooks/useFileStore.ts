@@ -6,7 +6,7 @@ import {
   type DragEvent,
   type SetStateAction
 } from 'react';
-import type { FileItem, TargetMode } from '@/types/file';
+import type { FileItem, RenameOrigin, TargetMode } from '@/types/file';
 import { generateNewNames, type AIServiceConfig } from '@/lib/ai-service';
 import { ensureExtension } from '@/lib/filename';
 import { electronApi } from '@/lib/electron-api';
@@ -51,8 +51,8 @@ export type UseFileStoreResult = {
   addFiles: (newFiles: FileItem[]) => void;
   reorderFiles: (oldIndex: number, newIndex: number) => void;
   removeFile: (id: string) => void;
-  updateFileName: (id: string, newName: string) => void;
-  batchUpdateFileNames: (newNames: string[]) => void;
+  updateFileName: (id: string, newName: string, origin?: RenameOrigin) => void;
+  batchUpdateFileNames: (newNames: string[], origin?: RenameOrigin) => void;
   clearFiles: () => void;
   discardChanges: () => void;
   revertFileName: (index: number) => void;
@@ -210,21 +210,27 @@ export function useFileStore(options?: UseFileStoreOptions): UseFileStoreResult 
   );
 
   const updateFileName = useCallback(
-    (id: string, newName: string) => {
+    (id: string, newName: string, origin: RenameOrigin = 'user') => {
       setCurrentFiles((prev) =>
-        prev.map((file) => (file.id === id ? { ...file, renamed: newName } : file))
+        prev.map((file) => {
+          if (file.id !== id) return file;
+          if (file.renamed === newName) return file;
+          return { ...file, renamed: newName, renameOrigin: origin };
+        })
       );
     },
     [setCurrentFiles]
   );
 
   const batchUpdateFileNames = useCallback(
-    (newNames: string[]) => {
+    (newNames: string[], origin: RenameOrigin = 'rule') => {
       setCurrentFiles((prev) =>
-        prev.map((file, index) => ({
-          ...file,
-          renamed: newNames[index] ?? file.renamed
-        }))
+        prev.map((file, index) => {
+          const nextName = newNames[index];
+          if (nextName === undefined) return file;
+          if (nextName === file.renamed) return file;
+          return { ...file, renamed: nextName, renameOrigin: origin };
+        })
       );
     },
     [setCurrentFiles]
@@ -247,7 +253,8 @@ export function useFileStore(options?: UseFileStoreOptions): UseFileStoreResult 
     setCurrentFiles((prev) =>
       prev.map((file) => ({
         ...file,
-        renamed: file.original
+        renamed: file.original,
+        renameOrigin: 'initial'
       }))
     );
   }, [setCurrentFiles]);
@@ -256,7 +263,9 @@ export function useFileStore(options?: UseFileStoreOptions): UseFileStoreResult 
   const revertFileName = useCallback(
     (index: number) => {
       setCurrentFiles((prev) =>
-        prev.map((file, i) => (i === index ? { ...file, renamed: file.original } : file))
+        prev.map((file, i) =>
+          i === index ? { ...file, renamed: file.original, renameOrigin: 'initial' } : file
+        )
       );
     },
     [setCurrentFiles]
@@ -266,10 +275,11 @@ export function useFileStore(options?: UseFileStoreOptions): UseFileStoreResult 
   const applyRule = useCallback(
     (handler: (name: string, index: number) => string) => {
       setCurrentFiles((prev) =>
-        prev.map((file, index) => ({
-          ...file,
-          renamed: handler(file.renamed, index)
-        }))
+        prev.map((file, index) => {
+          const nextName = handler(file.renamed, index);
+          if (nextName === file.renamed) return file;
+          return { ...file, renamed: nextName, renameOrigin: 'rule' };
+        })
       );
     },
     [setCurrentFiles]
@@ -312,7 +322,8 @@ export function useFileStore(options?: UseFileStoreOptions): UseFileStoreResult 
               original: file.name,
               renamed: file.name,
               path: finalPath || file.name,
-              isDirectory: true
+              isDirectory: true,
+              renameOrigin: 'initial'
             });
           } else {
             ignoredFileCount++;
@@ -348,7 +359,8 @@ export function useFileStore(options?: UseFileStoreOptions): UseFileStoreResult 
               original: file.name,
               renamed: file.name,
               path: finalPath || file.name,
-              isDirectory: false
+              isDirectory: false,
+              renameOrigin: 'initial'
             });
           }
         }
@@ -366,7 +378,8 @@ export function useFileStore(options?: UseFileStoreOptions): UseFileStoreResult 
               original: f.name,
               renamed: f.name,
               path: f.path,
-              isDirectory: false
+              isDirectory: false,
+              renameOrigin: 'initial'
             }));
 
             if (!result.hasSubdirectories) {
@@ -411,7 +424,8 @@ export function useFileStore(options?: UseFileStoreOptions): UseFileStoreResult 
         original: f.name,
         renamed: f.name,
         path: f.path,
-        isDirectory: false
+        isDirectory: false,
+        renameOrigin: 'initial'
       }));
       if (scannedFiles.length > 0) addFiles(scannedFiles);
     });
@@ -452,7 +466,7 @@ export function useFileStore(options?: UseFileStoreOptions): UseFileStoreResult 
           return;
         }
 
-        batchUpdateFileNames(newNames);
+        batchUpdateFileNames(newNames, 'ai');
       } finally {
         setIsRenaming(false);
         abortControllerRef.current = null;
@@ -485,7 +499,9 @@ export function useFileStore(options?: UseFileStoreOptions): UseFileStoreResult 
           }
 
           const finalName = lockSuffixRef.current
-            ? ensureExtension(file.renamed, file.original)
+            ? file.renameOrigin === 'ai' && !file.isDirectory
+              ? ensureExtension(file.renamed, file.original)
+              : file.renamed
             : file.renamed;
           if (finalName.split(/[/\\]/).length > 1) {
             localErrors.push({
@@ -560,14 +576,29 @@ export function useFileStore(options?: UseFileStoreOptions): UseFileStoreResult 
               ...file,
               original: actualFileName,
               renamed: actualFileName,
-              path: actualNewPath
+              path: actualNewPath,
+              renameOrigin: 'initial'
             };
           }
-          // 未改名的保持原样
-          return {
-            ...file,
-            original: file.renamed
-          };
+          // 未返回映射：可能是 old===new 的 no-op（例如 AI 去掉后缀但开启“锁定后缀”后被补回）
+          // 这里绝不能用未补全的 renamed 覆盖 original，否则会导致 UI 丢失扩展名。
+          const committedName =
+            lockSuffixRef.current && file.renameOrigin === 'ai' && !file.isDirectory
+              ? ensureExtension(file.renamed, file.original)
+              : file.renamed;
+
+          if (committedName === file.original) {
+            // 应用后等价于未改名：将 UI 恢复为原名并清除改动状态
+            if (file.renamed === file.original && file.renameOrigin === 'initial') return file;
+            return { ...file, renamed: file.original, renameOrigin: 'initial' };
+          }
+
+          // 兜底：若 committedName 与编辑框内容不同（例如补全了后缀），至少让 UI 展示已提交的名字
+          if (committedName !== file.renamed) {
+            return { ...file, renamed: committedName };
+          }
+
+          return file;
         })
       );
     },
@@ -613,7 +644,8 @@ export function useFileStore(options?: UseFileStoreOptions): UseFileStoreResult 
                 ...file,
                 original: newName,
                 renamed: newName,
-                path: newPath
+                path: newPath,
+                renameOrigin: 'initial'
               };
             }
             return file;

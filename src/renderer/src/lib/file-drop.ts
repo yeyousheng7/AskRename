@@ -73,7 +73,8 @@ export function toFileItemsFromDataTransferFiles(
       id: `${file.name}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       original: file.name,
       renamed: file.name,
-      path: finalPath || file.name
+      path: finalPath || file.name,
+      renameOrigin: 'initial'
     };
   });
 }
