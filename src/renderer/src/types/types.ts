@@ -20,6 +20,23 @@ export interface RenameValidationResult {
   error?: string;
 }
 
+export interface RegexSubmitParams {
+  findPattern: string;
+  replacePattern: string;
+}
+
+export interface TextSubmitParams {
+  instruction: string;
+}
+
+export interface StrategySubmitParamsById {
+  smart: TextSubmitParams;
+  ai: TextSubmitParams;
+  regex: RegexSubmitParams;
+}
+
+export type StrategySubmitParams = StrategySubmitParamsById[RenameStrategyId];
+
 export interface RenameStrategy<TParams = unknown> {
   id: RenameStrategyId;
   meta: RenameStrategyMeta;

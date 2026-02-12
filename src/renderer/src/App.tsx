@@ -24,11 +24,11 @@ import { generateAutoDecision, getConfigFromEnv } from '@/lib/ai-service';
 import { generateRegexFromDescription } from '@/lib/regex-assist';
 import { batchApplyMagicRegex } from '@/lib/magic-regex';
 import { cn } from '@/lib/utils';
-import { MODES } from '@/modes/registry';
-import type { AnyRenameStrategy } from '@renderer/types/types';
+import { executeModeStrategy } from '@/modes/registry';
 import type { AISessionState, PendingDecision } from '@/types/ai';
 import type { Mode } from '@/types/mode';
 import type { SettingsTabId } from '@/types/settings';
+import type { RegexSubmitParams, TextSubmitParams } from '@renderer/types/types';
 
 // ============================================================================
 // App 主组件
@@ -494,47 +494,37 @@ function App(): React.JSX.Element {
 
   const handleGenerateByStrategy = useCallback(
     async (params?: unknown) => {
-      const strategy = MODES[mode] as AnyRenameStrategy | undefined;
-      if (!strategy) return;
-
-      if (mode === 'regex') {
-        const regexParams =
-          params && typeof params === 'object' && 'findPattern' in params
-            ? (params as { findPattern: string; replacePattern: string })
-            : { findPattern, replacePattern };
-
-        const validation = strategy.validate?.(regexParams);
-        if (validation && !validation.valid) {
-          showToast(validation.error || '参数无效', 'error');
-          return;
-        }
-
-        const nextFiles = await strategy.execute(files, regexParams);
-        const nextNames = nextFiles.map((f) => f.renamed);
-        batchUpdateFileNames(nextNames, 'rule');
-        return;
-      }
-
-      const aiLikeParams =
-        params && typeof params === 'object' && 'instruction' in params
-          ? (params as { instruction: string })
-          : { instruction };
-
-      const validation = strategy.validate?.(aiLikeParams);
-      if (validation && !validation.valid) {
-        showToast(validation.error || '参数无效', 'error');
-        return;
-      }
-
-      const handlers: Record<Exclude<Mode, 'regex'>, () => Promise<void>> = {
+      const runners: Record<'smart' | 'ai', (instruction: string) => Promise<void>> = {
         smart: handleSmartRename,
         ai: handleRename
       };
 
-      await strategy.execute(files, {
-        instruction: aiLikeParams.instruction,
-        runner: handlers[mode as Exclude<Mode, 'regex'>]
-      });
+      if (mode === 'regex') {
+        const regexParams: RegexSubmitParams =
+          params && typeof params === 'object' && 'findPattern' in params
+            ? (params as RegexSubmitParams)
+            : { findPattern, replacePattern };
+
+        const result = await executeModeStrategy(mode, files, regexParams, runners);
+        if (!result.ok) {
+          showToast(result.error, 'error');
+          return;
+        }
+
+        const nextNames = result.files.map((f) => f.renamed);
+        batchUpdateFileNames(nextNames, 'rule');
+        return;
+      }
+
+      const textParams: TextSubmitParams =
+        params && typeof params === 'object' && 'instruction' in params
+          ? (params as TextSubmitParams)
+          : { instruction };
+
+      const result = await executeModeStrategy(mode, files, textParams, runners);
+      if (!result.ok) {
+        showToast(result.error, 'error');
+      }
     },
     [
       mode,
