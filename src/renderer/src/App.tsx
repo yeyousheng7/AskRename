@@ -60,7 +60,7 @@ function App(): React.JSX.Element {
   const settingsOpenTimerRef = useRef<number | null>(null);
   const [settingsForcedTab, setSettingsForcedTab] = useState<SettingsTabId | null>(null);
 
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const { resolvedTheme, toggleTheme } = useTheme();
   const { settings, updateSettings } = useSettings();

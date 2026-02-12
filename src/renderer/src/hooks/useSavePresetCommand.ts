@@ -19,7 +19,7 @@ export function useSavePresetCommand({
   addPreset,
   showToast
 }: {
-  inputRef: RefObject<HTMLInputElement | null>;
+  inputRef: RefObject<HTMLTextAreaElement | null>;
   addPreset: (preset: Omit<Preset, 'id'>) => void;
   showToast: (message: string, type: ToastType) => void;
 }): {

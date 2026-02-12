@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
+import TextareaAutosize from 'react-textarea-autosize';
 import { LoaderIcon, Sparkles, Undo2Icon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { HistoryDrawer } from '@/components/HistoryDrawer';
@@ -56,7 +57,7 @@ export function AppFooter({
   instruction: string;
   findPattern: string;
   replacePattern: string;
-  inputRef: RefObject<HTMLInputElement | null>;
+  inputRef: RefObject<HTMLTextAreaElement | null>;
   isEmpty: boolean;
   isReviewMode: boolean;
   isRenaming: boolean;
@@ -267,7 +268,7 @@ export function AppFooter({
           {/* 中间：输入区域 */}
           <div
             className={cn(
-              'flex-1 relative',
+              'flex-1 min-w-0 relative',
               'transition-all duration-300 ease-in-out',
               mode === 'regex' ? 'min-h-[88px]' : 'min-h-[44px]'
             )}
@@ -391,65 +392,72 @@ export function AppFooter({
                     query={instruction.startsWith('/') ? instruction.slice(1) : ''}
                   />
                 )}
-                <input
-                  ref={inputRef as RefObject<HTMLInputElement>}
-                  type="text"
-                  placeholder={
-                    isReviewMode
-                      ? '不满意？修改指令后按回车重新生成...'
-                      : '输入自然语言指令... 或 / 选择预设'
-                  }
-                  value={instruction}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    if (
-                      savePreset.maybeOpenFromText(val, onInstructionChange, {
-                        onBeforeBegin: slashMenu.close
-                      })
-                    ) {
-                      return;
+                <div className="h-full flex items-center">
+                  <TextareaAutosize
+                    ref={inputRef}
+                    placeholder={
+                      isReviewMode
+                        ? '不满意？修改指令后按回车重新生成...'
+                        : '输入自然语言指令... 或 / 选择预设'
                     }
-                    onInstructionChange(val);
-                    slashMenu.setOpenForText(val);
-                  }}
-                  onKeyDown={(e) => {
-                    if (slashMenu.handleKeyDown(e)) return;
-
-                    // ===== 原有键盘逻辑 =====
-                    // Enter: 发送指令（如果有文本）
-                    if (e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
-                      e.preventDefault();
+                    value={instruction}
+                    onChange={(e) => {
+                      const val = e.target.value;
                       if (
-                        savePreset.maybeOpenFromInstruction(instruction, onInstructionChange, {
+                        savePreset.maybeOpenFromText(val, onInstructionChange, {
                           onBeforeBegin: slashMenu.close
                         })
                       ) {
                         return;
                       }
-                      if (instruction.trim()) onGenerate();
-                    }
-                    // Cmd/Ctrl + Enter: review 状态下确认应用
-                    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                      e.preventDefault();
-                      if (aiSession === 'review') {
-                        onConfirmDecision();
+                      onInstructionChange(val);
+                      slashMenu.setOpenForText(val);
+                    }}
+                    onKeyDown={(e) => {
+                      if (slashMenu.handleKeyDown(e)) return;
+
+                      // 避免输入法组合阶段误触发提交
+                      if (e.nativeEvent.isComposing) return;
+
+                      // ===== 原有键盘逻辑 =====
+                      // Enter: 发送指令（如果有文本）
+                      if (e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
+                        e.preventDefault();
+                        if (
+                          savePreset.maybeOpenFromInstruction(instruction, onInstructionChange, {
+                            onBeforeBegin: slashMenu.close
+                          })
+                        ) {
+                          return;
+                        }
+                        if (instruction.trim()) onGenerate();
                       }
-                    }
-                    // Esc: 放弃当前 AI 建议
-                    if (e.key === 'Escape') {
-                      e.preventDefault();
-                      if (aiSession === 'review') {
-                        onDiscardDecision();
+                      // Cmd/Ctrl + Enter: review 状态下确认应用
+                      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                        e.preventDefault();
+                        if (aiSession === 'review') {
+                          onConfirmDecision();
+                        }
                       }
-                    }
-                  }}
-                  disabled={isEmpty || isDisabled}
-                  className={cn(
-                    'w-full h-full pl-4 pr-4 py-3 bg-transparent border-0 outline-none',
-                    'text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500',
-                    'text-sm'
-                  )}
-                />
+                      // Esc: 放弃当前 AI 建议
+                      if (e.key === 'Escape') {
+                        e.preventDefault();
+                        if (aiSession === 'review') {
+                          onDiscardDecision();
+                        }
+                      }
+                    }}
+                    disabled={isEmpty || isDisabled}
+                    className={cn(
+                      'flex-1 min-w-0 pl-4 pr-4 py-2.5 leading-6 bg-transparent border-0 outline-none',
+                      'resize-none overflow-y-auto overflow-x-hidden break-words',
+                      'text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500',
+                      'text-sm'
+                    )}
+                    minRows={1}
+                    maxRows={6}
+                  />
+                </div>
               </>
             )}
           </div>

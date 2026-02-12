@@ -348,7 +348,7 @@ export function useBatchAI(): UseBatchAIResult {
     abortControllerRef.current?.abort();
 
     const current = batchesRef.current;
-    const next = current.map((b) => {
+    const next: Batch[] = current.map((b): Batch => {
       if (b.status === 'in_flight') {
         if (b.requestId) void electronApi.cancelAI(b.requestId);
         return { ...b, status: 'canceled' };
@@ -394,17 +394,16 @@ export function useBatchAI(): UseBatchAIResult {
     if (!startParamsRef.current) return;
 
     const current = batchesRef.current;
-    const next = current.map((b) =>
-      b.status === 'error'
-        ? {
-            ...b,
-            status: 'pending',
-            errorMessage: undefined,
-            resultNames: undefined,
-            requestId: undefined
-          }
-        : b
-    );
+    const next: Batch[] = current.map((b): Batch => {
+      if (b.status !== 'error') return b;
+      return {
+        ...b,
+        status: 'pending',
+        errorMessage: undefined,
+        resultNames: undefined,
+        requestId: undefined
+      };
+    });
     setBatchesAndRefs(next);
     haltSchedulingRef.current = false;
     if (!abortControllerRef.current || abortControllerRef.current.signal.aborted) {

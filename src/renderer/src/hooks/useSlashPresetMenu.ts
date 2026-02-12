@@ -13,7 +13,7 @@ export function useSlashPresetMenu({
 }: {
   instruction: string;
   presets: Preset[];
-  inputRef: RefObject<HTMLInputElement | null>;
+  inputRef: RefObject<HTMLTextAreaElement | null>;
   onModeChange: (mode: Mode) => void;
   onInstructionChange: (next: string) => void;
   onFindPatternChange: (next: string) => void;
@@ -27,7 +27,7 @@ export function useSlashPresetMenu({
   setOpenForText: (text: string) => void;
   close: () => void;
   handleSelect: (preset: Preset) => void;
-  handleKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => boolean;
+  handleKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => boolean;
 } {
   const [isOpen, setIsOpen] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -83,7 +83,7 @@ export function useSlashPresetMenu({
   );
 
   const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLInputElement>): boolean => {
+    (e: React.KeyboardEvent<HTMLTextAreaElement>): boolean => {
       if (!isOpen || filteredPresets.length === 0) return false;
 
       if (e.key === 'ArrowDown') {
