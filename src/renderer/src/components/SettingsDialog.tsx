@@ -1,14 +1,16 @@
 ﻿import { useCallback, useEffect, useState } from 'react';
-import { ListIcon, SettingsIcon, XIcon } from 'lucide-react';
+import { ListIcon, SettingsIcon, SlidersHorizontalIcon, XIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { AISettings } from '@/hooks/useSettings';
 import { ApiTab } from '@/components/settings/ApiTab';
+import { PreferencesTab } from '@/components/settings/PreferencesTab';
 import { PresetsTab } from '@/components/settings/PresetsTab';
 import type { SettingsTabId } from '@/types/settings';
 import { cn } from '@/lib/utils';
 
 const TABS: { id: SettingsTabId; label: string; icon: React.ReactNode }[] = [
   { id: 'api', label: 'API 配置', icon: <SettingsIcon className="h-4 w-4" /> },
+  { id: 'preferences', label: '偏好设置', icon: <SlidersHorizontalIcon className="h-4 w-4" /> },
   { id: 'presets', label: '预设管理', icon: <ListIcon className="h-4 w-4" /> }
 ];
 
@@ -93,6 +95,9 @@ export function SettingsDialog({
           <div className="flex-1 overflow-y-auto p-5">
             {effectiveTab === 'api' && (
               <ApiTab settings={settings} updateSettings={updateSettings} />
+            )}
+            {effectiveTab === 'preferences' && (
+              <PreferencesTab settings={settings} updateSettings={updateSettings} />
             )}
             {effectiveTab === 'presets' && <PresetsTab />}
           </div>

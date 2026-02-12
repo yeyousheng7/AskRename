@@ -66,7 +66,10 @@ function App(): React.JSX.Element {
   const { settings, updateSettings } = useSettings();
   const { toast, showToast, dismissToast } = useToast();
   const { history, addToHistory } = useSessionHistory();
-  const batchAI = useBatchAI();
+  const batchAI = useBatchAI({
+    batchSize: settings.batchSize,
+    concurrencyLimit: settings.concurrencyLimit
+  });
 
   const {
     files,
@@ -97,7 +100,8 @@ function App(): React.JSX.Element {
     resetAfterApply,
     undo
   } = useFileStore({
-    onFilesIgnored: (count) => showToast(`文件夹模式下已忽略 ${count} 个文件`, 'error')
+    onFilesIgnored: (count) => showToast(`文件夹模式下已忽略 ${count} 个文件`, 'error'),
+    lockSuffix: settings.lockSuffix
   });
 
   const [editingIndex, setEditingIndex] = useState<number | null>(null);

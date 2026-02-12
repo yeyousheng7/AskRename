@@ -3,8 +3,15 @@ import type { AIChatSettings, ChatMessage } from '@shared/ipc-types';
 import { electronApi } from '@/lib/electron-api';
 import { AI_SYSTEM_PROMPT } from '@/lib/ai-service';
 
-const BATCH_SIZE = 10;
-const CONCURRENCY_LIMIT = 3;
+const DEFAULT_BATCH_SIZE = 10;
+const DEFAULT_CONCURRENCY_LIMIT = 3;
+
+export type UseBatchAIOptions = {
+  /** 每批处理多少个文件名（>= 1） */
+  batchSize?: number;
+  /** 并发批次数量上限（>= 1） */
+  concurrencyLimit?: number;
+};
 
 export type BatchAIStatus = 'idle' | 'processing' | 'paused' | 'error';
 export type BatchStatus = 'pending' | 'in_flight' | 'success' | 'error' | 'canceled';
@@ -49,10 +56,16 @@ export type UseBatchAIResult = {
 
 type StartParams = Parameters<UseBatchAIResult['start']>[0];
 
-function buildBatches(jobId: string, items: BatchItem[]): Batch[] {
+function clampInt(value: number, min: number, max: number, fallback: number): number {
+  const v = Math.floor(Number(value));
+  if (!Number.isFinite(v)) return fallback;
+  return Math.min(Math.max(v, min), max);
+}
+
+function buildBatches(jobId: string, items: BatchItem[], batchSize: number): Batch[] {
   const batches: Batch[] = [];
-  for (let start = 0, batchIndex = 0; start < items.length; start += BATCH_SIZE, batchIndex++) {
-    const end = Math.min(start + BATCH_SIZE, items.length);
+  for (let start = 0, batchIndex = 0; start < items.length; start += batchSize, batchIndex++) {
+    const end = Math.min(start + batchSize, items.length);
     batches.push({
       batchId: `${jobId}:${batchIndex}`,
       batchIndex,
@@ -111,7 +124,22 @@ function summarizeErrors(batches: Batch[]): string | undefined {
   return errors.slice(0, 5).join('\n');
 }
 
-export function useBatchAI(): UseBatchAIResult {
+export function useBatchAI(options?: UseBatchAIOptions): UseBatchAIResult {
+  const batchSize = useMemo(
+    () => clampInt(options?.batchSize ?? DEFAULT_BATCH_SIZE, 1, 50, DEFAULT_BATCH_SIZE),
+    [options?.batchSize]
+  );
+  const concurrencyLimit = useMemo(
+    () =>
+      clampInt(
+        options?.concurrencyLimit ?? DEFAULT_CONCURRENCY_LIMIT,
+        1,
+        10,
+        DEFAULT_CONCURRENCY_LIMIT
+      ),
+    [options?.concurrencyLimit]
+  );
+
   const [status, setStatus] = useState<BatchAIStatus>('idle');
   const [batches, setBatches] = useState<Batch[]>([]);
   const [totalFiles, setTotalFiles] = useState(0);
@@ -281,7 +309,7 @@ export function useBatchAI(): UseBatchAIResult {
       while (true) {
         const current = batchesRef.current;
         const inFlightCount = current.filter((b) => b.status === 'in_flight').length;
-        if (inFlightCount >= CONCURRENCY_LIMIT) return;
+        if (inFlightCount >= concurrencyLimit) return;
 
         const nextPendingIndex = current.findIndex((b) => b.status === 'pending');
         if (nextPendingIndex === -1) {
@@ -311,7 +339,7 @@ export function useBatchAI(): UseBatchAIResult {
       // In case we returned early without launching a batch, release scheduling lock.
       schedulingRef.current = false;
     }
-  }, [runBatch, setBatchesAndRefs]);
+  }, [concurrencyLimit, runBatch, setBatchesAndRefs]);
 
   useEffect(() => {
     if (status !== 'processing') return;
@@ -332,12 +360,12 @@ export function useBatchAI(): UseBatchAIResult {
       setTotalFiles(items.length);
       setCompletedFiles(0);
 
-      const initial = buildBatches(jobId, items);
+      const initial = buildBatches(jobId, items, batchSize);
       setBatchesAndRefs(initial);
 
       setStatus(items.length === 0 ? 'idle' : 'processing');
     },
-    [setBatchesAndRefs]
+    [batchSize, setBatchesAndRefs]
   );
 
   const cancel = useCallback(() => {

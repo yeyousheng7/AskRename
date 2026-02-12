@@ -1,1 +1,1 @@
-export type SettingsTabId = 'api' | 'presets';
+export type SettingsTabId = 'api' | 'presets' | 'preferences';

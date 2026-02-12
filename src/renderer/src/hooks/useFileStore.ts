@@ -30,6 +30,9 @@ export type HistoryItem = {
 export type UseFileStoreOptions = {
   /** 文件夹模式下拖入文件时触发的回调，参数为被忽略的文件数 */
   onFilesIgnored?: (count: number) => void;
+
+  /** 后缀锁定：当新文件名没有扩展名时，自动补全原扩展名（默认开启） */
+  lockSuffix?: boolean;
 };
 
 // Hook 返回类型
@@ -92,6 +95,7 @@ export function useFileStore(options?: UseFileStoreOptions): UseFileStoreResult 
   const abortControllerRef = useRef<AbortController | null>(null);
   const highlightTimerRef = useRef<number | null>(null);
   const onFilesIgnoredRef = useRef(options?.onFilesIgnored);
+  const lockSuffixRef = useRef(options?.lockSuffix ?? true);
   const pendingScanDepthRef = useRef<{
     folderPaths: string[];
     directFiles: FileItem[];
@@ -123,6 +127,10 @@ export function useFileStore(options?: UseFileStoreOptions): UseFileStoreResult 
   useEffect(() => {
     onFilesIgnoredRef.current = options?.onFilesIgnored;
   }, [options?.onFilesIgnored]);
+
+  useEffect(() => {
+    lockSuffixRef.current = options?.lockSuffix ?? true;
+  }, [options?.lockSuffix]);
 
   useEffect(() => {
     return () => {
@@ -476,7 +484,9 @@ export function useFileStore(options?: UseFileStoreOptions): UseFileStoreResult 
             return [];
           }
 
-          const finalName = ensureExtension(file.renamed, file.original);
+          const finalName = lockSuffixRef.current
+            ? ensureExtension(file.renamed, file.original)
+            : file.renamed;
           if (finalName.split(/[/\\]/).length > 1) {
             localErrors.push({
               path: file.path,
