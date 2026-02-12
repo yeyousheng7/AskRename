@@ -16,6 +16,12 @@ import { FooterReviewActionsBar } from '@/components/footer/ReviewActionsBar';
 import { FooterSubmitControl } from '@/components/footer/SubmitControl';
 import { useSavePresetCommand } from '@/hooks/useSavePresetCommand';
 import { useSlashPresetMenu } from '@/hooks/useSlashPresetMenu';
+import {
+  getModeSubmitInput,
+  MODES,
+  resolveFooterReviewKind,
+  shouldDisableSubmitForReview
+} from '@/modes/registry';
 
 export function AppFooter({
   mode,
@@ -155,7 +161,13 @@ export function AppFooter({
 
   const savePreset = useSavePresetCommand({ inputRef, addPreset, showToast });
   const isDisabled = isRenaming || isApplying || isUndoing;
-  const canSubmit = mode === 'regex' ? findPattern.trim() : instruction.trim();
+  const strategyUi = MODES[mode].meta.ui;
+  const canSubmit = getModeSubmitInput(mode, { instruction, findPattern });
+  const reviewKind = resolveFooterReviewKind({ mode, aiSession, isReviewMode, pendingDecision });
+  const disableSubmitForReview = shouldDisableSubmitForReview(mode, {
+    instruction,
+    isReviewMode
+  });
 
   const handlePrimarySubmit = (): void => {
     if (
@@ -211,7 +223,9 @@ export function AppFooter({
           'overflow-visible'
         )}
       >
-        {mode !== 'regex' && <HistoryDrawer history={history} onSelect={onSelectHistory} />}
+        {strategyUi?.showHistoryDrawer && (
+          <HistoryDrawer history={history} onSelect={onSelectHistory} />
+        )}
 
         {error && (
           <div className="px-4 pt-3 pb-0">
@@ -221,7 +235,7 @@ export function AppFooter({
           </div>
         )}
 
-        {aiSession === 'review' && mode === 'smart' && pendingDecision && (
+        {reviewKind === 'smart-decision' && pendingDecision && (
           <FooterPendingDecisionCard
             pendingDecision={pendingDecision}
             isApplying={isApplying}
@@ -231,7 +245,7 @@ export function AppFooter({
           />
         )}
 
-        {isReviewMode && mode === 'ai' && (
+        {reviewKind === 'ai-review' && (
           <FooterPendingDecisionCard
             pendingDecision={{ type: 'list', names: [] }}
             isApplying={isApplying}
@@ -241,7 +255,7 @@ export function AppFooter({
           />
         )}
 
-        {isReviewMode && (mode === 'regex' || (mode === 'smart' && aiSession !== 'review')) && (
+        {reviewKind === 'plain-review' && (
           <FooterReviewActionsBar
             isApplying={isApplying}
             isUndoing={isUndoing}
@@ -257,7 +271,7 @@ export function AppFooter({
             className={cn(
               'flex-1 min-w-0 relative',
               'transition-all duration-300 ease-in-out',
-              mode === 'regex' ? 'min-h-[88px]' : 'min-h-[44px]'
+              strategyUi?.inputMinHeightClass ?? 'min-h-[44px]'
             )}
           >
             {mode === 'regex' ? (
@@ -436,15 +450,14 @@ export function AppFooter({
           </div>
 
           <FooterSubmitControl
-            mode={mode}
             aiSession={aiSession}
-            instruction={instruction}
-            isReviewMode={isReviewMode}
+            disableSubmitForReview={disableSubmitForReview}
             isRenaming={isRenaming}
             isApplying={isApplying}
             isEmpty={isEmpty}
             isDisabled={isDisabled}
             canSubmit={canSubmit}
+            primaryTitle={strategyUi?.submitTitle ?? '生成'}
             onStop={onStop}
             onPrimary={handlePrimarySubmit}
           />

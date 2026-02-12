@@ -1,5 +1,7 @@
 import type { RenameStrategyId } from '@renderer/types/types';
 import type {
+  FooterReviewKind,
+  FooterReviewResolverContext,
   RegexSubmitParams,
   StrategySubmitParamsById,
   TextSubmitParams
@@ -21,6 +23,42 @@ export function getModeById(id: RenameStrategyId): (typeof MODES)[RenameStrategy
 
 export function getModeList(): Array<(typeof MODES)[RenameStrategyId]> {
   return Object.values(MODES);
+}
+
+export function getModeSubmitInput(
+  mode: RenameStrategyId,
+  values: {
+    instruction: string;
+    findPattern: string;
+  }
+): string {
+  return mode === 'regex' ? values.findPattern.trim() : values.instruction.trim();
+}
+
+export function resolveFooterReviewKind(ctx: FooterReviewResolverContext): FooterReviewKind {
+  if (ctx.aiSession === 'review' && ctx.mode === 'smart' && ctx.pendingDecision) {
+    return 'smart-decision';
+  }
+  if (ctx.isReviewMode && ctx.mode === 'ai') {
+    return 'ai-review';
+  }
+  if (
+    ctx.isReviewMode &&
+    (ctx.mode === 'regex' || (ctx.mode === 'smart' && ctx.aiSession !== 'review'))
+  ) {
+    return 'plain-review';
+  }
+  return 'none';
+}
+
+export function shouldDisableSubmitForReview(
+  mode: RenameStrategyId,
+  values: {
+    instruction: string;
+    isReviewMode: boolean;
+  }
+): boolean {
+  return values.isReviewMode && (mode === 'regex' || values.instruction.trim().length === 0);
 }
 
 type StrategyRunResult =

@@ -8,7 +8,12 @@ export const RegexStrategy: RenameStrategy<RegexParams> = {
   meta: {
     label: '正则',
     icon: Regex,
-    description: '手动输入正则表达式'
+    description: '手动输入正则表达式',
+    ui: {
+      inputMinHeightClass: 'min-h-[88px]',
+      showHistoryDrawer: false,
+      submitTitle: '应用正则替换'
+    }
   },
   InputComponent: RegexInput,
   validate: (params) => {

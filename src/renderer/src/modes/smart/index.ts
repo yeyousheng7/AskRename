@@ -10,7 +10,12 @@ export const SmartStrategy: RenameStrategy<
   meta: {
     label: '智能',
     icon: Zap,
-    description: 'AI 自动判断使用正则或完整生成'
+    description: 'AI 自动判断使用正则或完整生成',
+    ui: {
+      inputMinHeightClass: 'min-h-[44px]',
+      showHistoryDrawer: true,
+      submitTitle: '生成'
+    }
   },
   InputComponent: SmartInput,
   validate: (params) => {

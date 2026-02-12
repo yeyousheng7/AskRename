@@ -1,5 +1,6 @@
 import type { ComponentType } from 'react';
 import type { FileItem } from '@/types/file';
+import type { AISessionState, PendingDecision } from '@/types/ai';
 
 export type RenameStrategyId = 'smart' | 'ai' | 'regex';
 
@@ -7,6 +8,11 @@ export interface RenameStrategyMeta {
   label: string;
   icon: ComponentType<{ className?: string }>;
   description?: string;
+  ui?: {
+    inputMinHeightClass: string;
+    showHistoryDrawer: boolean;
+    submitTitle: string;
+  };
 }
 
 export interface RenameStrategyInputProps<TParams = unknown> {
@@ -36,6 +42,15 @@ export interface StrategySubmitParamsById {
 }
 
 export type StrategySubmitParams = StrategySubmitParamsById[RenameStrategyId];
+
+export type FooterReviewKind = 'smart-decision' | 'ai-review' | 'plain-review' | 'none';
+
+export interface FooterReviewResolverContext {
+  mode: RenameStrategyId;
+  aiSession: AISessionState;
+  isReviewMode: boolean;
+  pendingDecision: PendingDecision;
+}
 
 export interface RenameStrategy<TParams = unknown> {
   id: RenameStrategyId;

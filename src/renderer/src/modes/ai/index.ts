@@ -11,7 +11,12 @@ export const AIStrategy: RenameStrategy<
   meta: {
     label: 'AI',
     icon: SparklesIcon,
-    description: '始终使用 AI 生成文件名'
+    description: '始终使用 AI 生成文件名',
+    ui: {
+      inputMinHeightClass: 'min-h-[44px]',
+      showHistoryDrawer: true,
+      submitTitle: '生成'
+    }
   },
   InputComponent: AIInput,
   validate: (params) => {

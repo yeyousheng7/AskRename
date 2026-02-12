@@ -1,36 +1,30 @@
 import { ArrowUpIcon, LoaderIcon, SquareIcon } from 'lucide-react';
 import type { AISessionState } from '@/types/ai';
-import type { Mode } from '@/types/mode';
 import { cn } from '@/lib/utils';
 
 export function FooterSubmitControl({
-  mode,
   aiSession,
-  instruction,
-  isReviewMode,
+  disableSubmitForReview,
   isRenaming,
   isApplying,
   isEmpty,
   isDisabled,
   canSubmit,
+  primaryTitle,
   onStop,
   onPrimary
 }: {
-  mode: Mode;
   aiSession: AISessionState;
-  instruction: string;
-  isReviewMode: boolean;
+  disableSubmitForReview: boolean;
   isRenaming: boolean;
   isApplying: boolean;
   isEmpty: boolean;
   isDisabled: boolean;
   canSubmit: string;
+  primaryTitle: string;
   onStop: () => void;
   onPrimary: () => void;
 }): React.JSX.Element {
-  const disableSubmitForReview =
-    isReviewMode && (mode === 'regex' || instruction.trim().length === 0);
-
   return (
     <div className="flex items-center pr-3">
       {isRenaming || aiSession === 'loading' ? (
@@ -86,7 +80,7 @@ export function FooterSubmitControl({
               ? 'bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 hover:scale-105'
               : 'bg-zinc-200 dark:bg-zinc-700 text-zinc-400 dark:text-zinc-500 cursor-not-allowed'
           )}
-          title={mode === 'regex' ? '应用正则替换' : '生成'}
+          title={primaryTitle}
         >
           {isApplying ? (
             <LoaderIcon className="h-4 w-4 animate-spin" />
