@@ -13,6 +13,15 @@ export function ClearAllButton({
 }): React.JSX.Element {
   const [state, setState] = useState<ConfirmState>('idle');
   const timerRef = useRef<number | null>(null);
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+
+  const resetToIdle = useCallback(() => {
+    if (timerRef.current !== null) {
+      window.clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    setState('idle');
+  }, []);
 
   // Cleanup timer on unmount
   useEffect(() => {
@@ -31,6 +40,32 @@ export function ClearAllButton({
     }
   }, [disabled]);
 
+  useEffect(() => {
+    if (state !== 'confirming') return;
+
+    const handlePointerDown = (event: MouseEvent | TouchEvent): void => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (buttonRef.current?.contains(target)) return;
+      resetToIdle();
+    };
+
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape') return;
+      resetToIdle();
+    };
+
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('touchstart', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('touchstart', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [state, resetToIdle]);
+
   const handleClick = useCallback(() => {
     if (disabled) return;
     if (state === 'idle') {
@@ -42,18 +77,15 @@ export function ClearAllButton({
       }, 2000);
     } else {
       // Second click: execute clear
-      if (timerRef.current !== null) {
-        window.clearTimeout(timerRef.current);
-        timerRef.current = null;
-      }
       onClear();
-      setState('idle');
+      resetToIdle();
     }
-  }, [disabled, state, onClear]);
+  }, [disabled, state, onClear, resetToIdle]);
 
   if (state === 'confirming' && !disabled) {
     return (
       <button
+        ref={buttonRef}
         onClick={handleClick}
         className={cn(
           'ml-1.5 inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-mono text-xs font-semibold',
@@ -68,6 +100,7 @@ export function ClearAllButton({
 
   return (
     <button
+      ref={buttonRef}
       onClick={handleClick}
       className={cn(
         'ml-1.5 p-0.5 rounded transition-colors',
