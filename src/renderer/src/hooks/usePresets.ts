@@ -1,37 +1,33 @@
-﻿import { useCallback, useSyncExternalStore } from 'react';
-import type { Preset } from '@/types/preset';
+import { useCallback, useSyncExternalStore } from 'react';
+import { isPresetKind, type Preset, type PresetKind } from '@/types/preset';
 import { isMode } from '@/types/mode';
-import { getModeList } from '@/modes/registry';
 
 const STORAGE_KEY = 'app-presets';
-const modeList = getModeList();
-const defaultRuleModeId =
-  modeList.find((item) => item.meta.ui?.showHistoryDrawer === false)?.id ?? modeList[0]?.id ?? 'ai';
 
 const DEFAULT_PRESETS: Preset[] = [
   {
     id: 'sys-remove-spaces',
     name: '移除空格',
     content: '\\s+',
-    modeId: defaultRuleModeId
+    kind: 'regex'
   },
   {
     id: 'sys-lowercase',
     name: '转为小写',
     content: '将文件名全部转为小写',
-    modeId: 'ai'
+    kind: 'instruction'
   },
   {
     id: 'sys-date-format',
     name: '规范日期',
     content: '从文件名中提取日期并格式化为 YYYY-MM-DD 格式',
-    modeId: 'ai'
+    kind: 'instruction'
   },
   {
     id: 'sys-snake-case',
     name: '蛇形命名',
     content: '转换为 snake_case 格式',
-    modeId: 'ai'
+    kind: 'instruction'
   }
 ];
 
@@ -48,24 +44,51 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
-function isPresetLike(value: unknown): value is Preset {
-  if (!isRecord(value)) return false;
-  if (!isMode(value.modeId)) return false;
-  return (
-    typeof value.id === 'string' &&
-    typeof value.name === 'string' &&
-    typeof value.content === 'string' &&
-    value.modeId.trim().length > 0
-  );
+function mapLegacyModeToKind(modeId: unknown): PresetKind | null {
+  if (!isMode(modeId)) return null;
+  return modeId === 'regex' ? 'regex' : 'instruction';
 }
 
-function parseStoredPresets(raw: string | null): Preset[] | null {
+function normalizeStoredPreset(value: unknown): { preset: Preset; migrated: boolean } | null {
+  if (!isRecord(value)) return null;
+  if (
+    typeof value.id !== 'string' ||
+    typeof value.name !== 'string' ||
+    typeof value.content !== 'string'
+  ) {
+    return null;
+  }
+
+  if (isPresetKind(value.kind)) {
+    return {
+      preset: { id: value.id, name: value.name, content: value.content, kind: value.kind },
+      migrated: false
+    };
+  }
+
+  const legacyKind = mapLegacyModeToKind(value.modeId);
+  if (!legacyKind) return null;
+
+  return {
+    preset: { id: value.id, name: value.name, content: value.content, kind: legacyKind },
+    migrated: true
+  };
+}
+
+function parseStoredPresets(raw: string | null): { presets: Preset[]; didMigrate: boolean } | null {
   if (!raw) return null;
   try {
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return null;
-    if (!parsed.every(isPresetLike)) return null;
-    return parsed as Preset[];
+
+    const normalized = parsed.map(normalizeStoredPreset);
+    if (normalized.some((item) => !item)) return null;
+
+    const entries = normalized as { preset: Preset; migrated: boolean }[];
+    return {
+      presets: entries.map((item) => item.preset),
+      didMigrate: entries.some((item) => item.migrated)
+    };
   } catch {
     return null;
   }
@@ -74,7 +97,16 @@ function parseStoredPresets(raw: string | null): Preset[] | null {
 function getStore(): Preset[] {
   if (presetsStore) return presetsStore;
   const stored = parseStoredPresets(localStorage.getItem(STORAGE_KEY));
-  presetsStore = stored ?? DEFAULT_PRESETS;
+
+  if (stored) {
+    presetsStore = stored.presets;
+    if (stored.didMigrate) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(stored.presets));
+    }
+    return presetsStore;
+  }
+
+  presetsStore = DEFAULT_PRESETS;
   return presetsStore;
 }
 
@@ -102,7 +134,7 @@ if (typeof window !== 'undefined') {
     if (e.key !== STORAGE_KEY) return;
     const parsed = parseStoredPresets(e.newValue);
     if (!parsed) return;
-    presetsStore = parsed;
+    presetsStore = parsed.presets;
     emitChange();
   });
 }

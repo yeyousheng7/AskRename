@@ -1,8 +1,12 @@
 import { PencilIcon, TrashIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import type { Preset } from '@/types/preset';
 import { cn } from '@/lib/utils';
-import { getModeById } from '@/modes/registry';
+import type { Preset, PresetKind } from '@/types/preset';
+
+const PRESET_KIND_LABELS: Record<PresetKind, string> = {
+  instruction: '指令',
+  regex: '正则'
+};
 
 export function PresetItem({
   preset,
@@ -14,13 +18,6 @@ export function PresetItem({
   onDelete: () => void;
 }): React.JSX.Element {
   const isSystem = preset.id.startsWith('sys-');
-  const modeLabel = (() => {
-    try {
-      return getModeById(preset.modeId).meta.label;
-    } catch {
-      return preset.modeId;
-    }
-  })();
   const truncatedContent =
     preset.content.length > 40 ? `${preset.content.slice(0, 40)}...` : preset.content;
 
@@ -38,7 +35,7 @@ export function PresetItem({
             {preset.name}
           </span>
           <span className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-400">
-            {modeLabel}
+            {PRESET_KIND_LABELS[preset.kind]}
           </span>
           {isSystem && (
             <span className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-zinc-200 text-zinc-600 dark:bg-zinc-700 dark:text-zinc-400">

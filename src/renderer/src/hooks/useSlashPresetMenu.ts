@@ -1,20 +1,15 @@
-﻿import { useCallback, useMemo, useState, type RefObject } from 'react';
+import { useCallback, useMemo, useState, type RefObject } from 'react';
 import type { Preset } from '@/types/preset';
-import type { Mode } from '@/types/mode';
 
 export function useSlashPresetMenu({
   instruction,
   presets,
   inputRef,
-  onModeChange,
-  onInstructionChange,
   onPresetSelect
 }: {
   instruction: string;
   presets: Preset[];
   inputRef: RefObject<HTMLTextAreaElement | null>;
-  onModeChange: (mode: Mode) => void;
-  onInstructionChange: (next: string) => void;
   onPresetSelect: (preset: Preset) => void;
 }): {
   isOpen: boolean;
@@ -59,13 +54,11 @@ export function useSlashPresetMenu({
 
   const handleSelect = useCallback(
     (preset: Preset) => {
-      onModeChange(preset.modeId);
       onPresetSelect(preset);
-      onInstructionChange('');
       close();
       setTimeout(() => inputRef.current?.focus(), 50);
     },
-    [close, inputRef, onInstructionChange, onModeChange, onPresetSelect]
+    [close, inputRef, onPresetSelect]
   );
 
   const handleKeyDown = useCallback(

@@ -26,6 +26,13 @@ function extractInstruction(payload: unknown): string {
   return typeof value === 'string' ? value : '';
 }
 
+function buildRegexPresetPayload(content: string): unknown {
+  const regexStrategy = getModeById('regex');
+  return regexStrategy.hydratePresetContent
+    ? regexStrategy.hydratePresetContent(content)
+    : { findPattern: content, replacePattern: '' };
+}
+
 export function useFooterController({
   mode,
   effectiveMode,
@@ -72,21 +79,21 @@ export function useFooterController({
     instruction,
     presets,
     inputRef,
-    onModeChange,
-    onInstructionChange: handleInstructionChange,
     onPresetSelect: (preset) => {
-      const nextStrategy = getModeById(preset.modeId);
-      const nextPayload = nextStrategy.hydratePresetContent
-        ? nextStrategy.hydratePresetContent(preset.content)
-        : { instruction: preset.content };
-      onPayloadChange(nextPayload);
+      if (preset.kind === 'regex') {
+        onModeChange('regex');
+        onPayloadChange(buildRegexPresetPayload(preset.content));
+        return;
+      }
+
+      onPayloadChange({ instruction: preset.content });
     }
   });
 
   const savePreset = useSavePresetCommand({
     inputRef,
     addPreset,
-    getModeId: () => mode,
+    getPresetKind: () => (mode === 'regex' ? 'regex' : 'instruction'),
     showToast
   });
   const maybeOpenFromInstruction = savePreset.maybeOpenFromInstruction;

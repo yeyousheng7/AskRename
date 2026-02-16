@@ -1,14 +1,17 @@
-﻿import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { XIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { isMode } from '@/types/mode';
-import type { Preset } from '@/types/preset';
 import { cn } from '@/lib/utils';
-import { getModeList } from '@/modes/registry';
+import { PRESET_KINDS, type Preset, type PresetKind } from '@/types/preset';
 
 const labelClass = 'text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5';
 const fieldGap = 'space-y-2';
+
+const PRESET_KIND_LABELS: Record<PresetKind, string> = {
+  instruction: '指令',
+  regex: '正则'
+};
 
 export function PresetEditorDialog({
   preset,
@@ -19,17 +22,16 @@ export function PresetEditorDialog({
   onSave: (data: Omit<Preset, 'id'>) => void;
   onCancel: () => void;
 }): React.JSX.Element {
-  const modeList = useMemo(() => getModeList(), []);
   const [name, setName] = useState(preset?.name ?? '');
   const [content, setContent] = useState(preset?.content ?? '');
-  const [modeId, setModeId] = useState(preset?.modeId ?? 'ai');
+  const [kind, setKind] = useState<PresetKind>(preset?.kind ?? 'instruction');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleSubmit = (): void => {
     if (!name.trim() || !content.trim()) return;
     if (isSubmitting) return;
     setIsSubmitting(true);
-    onSave({ name: name.trim(), content: content.trim(), modeId });
+    onSave({ name: name.trim(), content: content.trim(), kind });
   };
 
   const selectClass = cn(
@@ -37,6 +39,9 @@ export function PresetEditorDialog({
     'focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]',
     'dark:bg-input/30'
   );
+
+  const contentPlaceholder =
+    kind === 'regex' ? '请输入查找规则（正则表达式）...' : '请输入指令（Prompt）...';
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center">
@@ -63,18 +68,15 @@ export function PresetEditorDialog({
           </div>
 
           <div className={fieldGap}>
-            <label className={labelClass}>模式</label>
+            <label className={labelClass}>类型</label>
             <select
               className={selectClass}
-              value={modeId}
-              onChange={(e) => {
-                const next = e.target.value;
-                if (isMode(next)) setModeId(next);
-              }}
+              value={kind}
+              onChange={(e) => setKind(e.target.value as PresetKind)}
             >
-              {modeList.map((mode) => (
-                <option key={mode.id} value={mode.id}>
-                  {mode.meta.label}
+              {PRESET_KINDS.map((presetKind) => (
+                <option key={presetKind} value={presetKind}>
+                  {PRESET_KIND_LABELS[presetKind]}
                 </option>
               ))}
             </select>
@@ -85,7 +87,7 @@ export function PresetEditorDialog({
             <textarea
               value={content}
               onChange={(e) => setContent(e.target.value)}
-              placeholder="预设内容..."
+              placeholder={contentPlaceholder}
               className={cn(
                 'w-full h-24 rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none resize-none',
                 'focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]',

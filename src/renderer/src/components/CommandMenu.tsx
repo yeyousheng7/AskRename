@@ -1,7 +1,7 @@
-﻿import { useEffect, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { SlashIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { Preset } from '@/types/preset';
+import type { Preset, PresetKind } from '@/types/preset';
 
 interface CommandMenuProps {
   presets: Preset[];
@@ -9,6 +9,11 @@ interface CommandMenuProps {
   onSelect: (preset: Preset) => void;
   query: string;
 }
+
+const PRESET_KIND_LABELS: Record<PresetKind, string> = {
+  instruction: '指令',
+  regex: '正则'
+};
 
 export function CommandMenu({
   presets,
@@ -79,7 +84,7 @@ export function CommandMenu({
                     'border-blue-200/70 bg-blue-50 text-blue-700 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-300'
                   )}
                 >
-                  {preset.modeId}
+                  {PRESET_KIND_LABELS[preset.kind]}
                 </span>
               </div>
 

@@ -1,7 +1,6 @@
-﻿import { useCallback, useRef, useState, type RefObject } from 'react';
+import { useCallback, useRef, useState, type RefObject } from 'react';
 import type { ToastType } from '@/hooks/useToast';
-import type { Preset } from '@/types/preset';
-import type { Mode } from '@/types/mode';
+import type { Preset, PresetKind } from '@/types/preset';
 
 export function extractSaveCommandContent(text: string): string | null {
   const rightTrimmed = text.replace(/\s+$/, '');
@@ -18,12 +17,12 @@ export function extractSaveCommandContent(text: string): string | null {
 export function useSavePresetCommand({
   inputRef,
   addPreset,
-  getModeId,
+  getPresetKind,
   showToast
 }: {
   inputRef: RefObject<HTMLTextAreaElement | null>;
   addPreset: (preset: Omit<Preset, 'id'>) => void;
-  getModeId: () => Mode;
+  getPresetKind: () => PresetKind;
   showToast: (message: string, type: ToastType) => void;
 }): {
   isDialogOpen: boolean;
@@ -71,13 +70,13 @@ export function useSavePresetCommand({
   const confirm = useCallback(() => {
     const name = presetName.trim();
     if (!name) return;
-    addPreset({ name, content: presetContent, modeId: getModeId() });
+    addPreset({ name, content: presetContent, kind: getPresetKind() });
     setIsDialogOpen(false);
     setPresetName('');
     setPresetContent('');
     showToast('预设已保存', 'success');
     setTimeout(() => inputRef.current?.focus(), 50);
-  }, [addPreset, getModeId, inputRef, presetContent, presetName, showToast]);
+  }, [addPreset, getPresetKind, inputRef, presetContent, presetName, showToast]);
 
   const maybeBegin = useCallback(
     (
