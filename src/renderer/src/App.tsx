@@ -9,6 +9,7 @@ import { ScanDepthDialog } from '@/components/ScanDepthDialog';
 import { PaginationBar } from '@/components/PaginationBar';
 import { SettingsDialog } from '@/components/SettingsDialog';
 import { Toast } from '@/components/Toast';
+import { BatchSuggestDialog } from '@/components/BatchSuggestDialog';
 import { FileDropOverlay } from '@/components/FileDropOverlay';
 import { EmptyState } from '@/components/EmptyState';
 import { AppHeader } from '@/components/AppHeader';
@@ -65,6 +66,8 @@ function App(): React.JSX.Element {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const settingsOpenTimerRef = useRef<number | null>(null);
   const [settingsForcedTab, setSettingsForcedTab] = useState<SettingsTabId | null>(null);
+  const [isBatchSuggestOpen, setIsBatchSuggestOpen] = useState(false);
+  const pendingSubmitPayloadRef = useRef<unknown | null>(null);
 
   const { resolvedTheme, toggleTheme } = useTheme();
   const { settings, updateSettings } = useSettings();
@@ -117,6 +120,10 @@ function App(): React.JSX.Element {
     isBatchCapableMode &&
     (settings.batchPolicy === 'force' ||
       (settings.batchPolicy === 'auto' && files.length >= settings.batchThreshold));
+  const shouldSuggestBatchEnable =
+    (mode === 'ai' || (mode === 'smart' && !(smartDerivedRegex && !shouldBatchRun))) &&
+    settings.batchPolicy === 'off' &&
+    files.length >= Math.max(1, settings.batchThreshold);
   const isAnyProcessing = batchAI.status === 'processing' || isStrategyProcessing;
   const isReviewMode = hasChanges && !isAnyProcessing && batchAI.status === 'idle';
   const effectiveSubmitMode: Mode =
@@ -361,10 +368,15 @@ function App(): React.JSX.Element {
   );
 
   const handleGenerateByStrategy = useCallback(
-    async (params?: unknown) => {
+    async (params?: unknown, options?: { bypassBatchSuggest?: boolean }) => {
       if (files.length === 0 || isAnyProcessing || isApplying || isUndoing) return;
 
       const submitPayload = params ?? modePayloadRef.current;
+      if (!options?.bypassBatchSuggest && shouldSuggestBatchEnable) {
+        pendingSubmitPayloadRef.current = submitPayload;
+        setIsBatchSuggestOpen(true);
+        return;
+      }
 
       if (shouldBatchRun) {
         setError(null);
@@ -528,6 +540,7 @@ function App(): React.JSX.Element {
       mode,
       effectiveSubmitMode,
       shouldBatchRun,
+      shouldSuggestBatchEnable,
       smartDerivedRegex,
       showToast,
       files,
@@ -544,6 +557,32 @@ function App(): React.JSX.Element {
       pushInstructionHistory
     ]
   );
+
+  const closeBatchSuggestDialog = useCallback(() => {
+    pendingSubmitPayloadRef.current = null;
+    setIsBatchSuggestOpen(false);
+  }, []);
+
+  const openPreferencesFromBatchSuggest = useCallback(() => {
+    pendingSubmitPayloadRef.current = null;
+    setIsBatchSuggestOpen(false);
+    setSettingsForcedTab('preferences');
+    void openSettings();
+  }, [openSettings]);
+
+  const continueWithoutBatching = useCallback(() => {
+    const pending = pendingSubmitPayloadRef.current ?? modePayloadRef.current;
+    pendingSubmitPayloadRef.current = null;
+    setIsBatchSuggestOpen(false);
+    void handleGenerateByStrategy(pending, { bypassBatchSuggest: true });
+  }, [handleGenerateByStrategy]);
+
+  useEffect(() => {
+    if (!isBatchSuggestOpen) return;
+    if (shouldSuggestBatchEnable) return;
+    pendingSubmitPayloadRef.current = null;
+    setIsBatchSuggestOpen(false);
+  }, [isBatchSuggestOpen, shouldSuggestBatchEnable]);
 
   useEffect(() => {
     if (!shouldBatchRun) return;
@@ -709,6 +748,15 @@ function App(): React.JSX.Element {
           updateSettings={updateSettings}
         />
       )}
+
+      <BatchSuggestDialog
+        open={isBatchSuggestOpen}
+        fileCount={files.length}
+        threshold={Math.max(1, settings.batchThreshold)}
+        onClose={closeBatchSuggestDialog}
+        onOpenPreferences={openPreferencesFromBatchSuggest}
+        onContinue={continueWithoutBatching}
+      />
 
       {/* 拖放覆盖层 */}
       {isDragging && <FileDropOverlay targetMode={targetMode} />}
