@@ -22,6 +22,11 @@ import { useFooterController } from '@/hooks/useFooterController';
 import { useBatchAI } from '@/hooks/useBatchAI';
 import { electronApi } from '@/lib/electron-api';
 import { getConfigFromEnv } from '@/lib/ai-service';
+import {
+  extractFilePathsFromDataTransfer,
+  getElectronFilePath,
+  isAbsolutePathLike
+} from '@/lib/file-drop';
 import { cn } from '@/lib/utils';
 import {
   buildModePreview,
@@ -90,6 +95,7 @@ function App(): React.JSX.Element {
     hasChanges,
     canUndo,
     setTargetMode,
+    addFiles,
     removeFile,
     reorderFiles,
     updateFileName,
@@ -106,7 +112,7 @@ function App(): React.JSX.Element {
     resetAfterApply,
     undo
   } = useFileStore({
-    onFilesIgnored: (count) => showToast(`文件夹模式下已忽略 ${count} 个文件`, 'error'),
+    onFilesIgnored: (count) => showToast(`已忽略 ${count} 个非文件夹项`, 'error'),
     lockSuffix: settings.lockSuffix
   });
 
@@ -667,7 +673,68 @@ function App(): React.JSX.Element {
     }
   }, [hasChanges]);
 
-  const { isDragging, rootProps } = useFileDragOverlay(handleDrop);
+  const handleDropWithIgnoreToast = useCallback(
+    (e: React.DragEvent<HTMLDivElement>) => {
+      if (targetMode !== 'file') {
+        handleDrop(e);
+        return;
+      }
+
+      const items = e.dataTransfer.items;
+      const singleEntry = items.length === 1 ? items[0].webkitGetAsEntry?.() : null;
+      if (singleEntry?.isDirectory) {
+        handleDrop(e);
+        return;
+      }
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      const droppedFiles = Array.from(e.dataTransfer.files);
+      const rawPaths = droppedFiles.map((file) => getElectronFilePath(file));
+      const needsFallback = rawPaths.some((path) => !isAbsolutePathLike(path));
+      const fallbackPaths = needsFallback ? extractFilePathsFromDataTransfer(e.dataTransfer) : [];
+
+      const directFiles: FileItem[] = [];
+      let ignoredCount = 0;
+
+      for (let i = 0; i < items.length; i += 1) {
+        const entry = items[i].webkitGetAsEntry?.();
+        const file = droppedFiles[i];
+        if (entry?.isDirectory || !file) {
+          ignoredCount += 1;
+          continue;
+        }
+
+        const rawPath = rawPaths[i] || '';
+        const pathFromUri = fallbackPaths[i] || '';
+        const finalPath = isAbsolutePathLike(rawPath) ? rawPath : pathFromUri;
+        if (!isAbsolutePathLike(finalPath)) {
+          ignoredCount += 1;
+          continue;
+        }
+
+        directFiles.push({
+          id: `${file.name}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          original: file.name,
+          renamed: file.name,
+          path: finalPath,
+          isDirectory: false,
+          renameOrigin: 'initial'
+        });
+      }
+
+      if (directFiles.length > 0) {
+        addFiles(directFiles);
+      }
+      if (ignoredCount > 0) {
+        showToast(`已忽略 ${ignoredCount} 个非文件项`, 'error');
+      }
+    },
+    [targetMode, handleDrop, addFiles, showToast]
+  );
+
+  const { isDragging, rootProps } = useFileDragOverlay(handleDropWithIgnoreToast);
 
   const isEmpty = files.length === 0;
   const isPagingEnabled = files.length > PAGINATION_THRESHOLD && Number.isFinite(pageSize);
