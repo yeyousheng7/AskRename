@@ -93,7 +93,7 @@ export function PreferencesTab({
             onChange={(e) => handleBatchThresholdChange(e.target.value)}
           />
           <div className={helpClass}>
-            仅在"自动"策略下生效：文件总数达到该值时启用分批。关闭策略时不可编辑。
+            仅在&quot;自动&quot;策略下生效：文件总数达到该值时启用分批。关闭策略时不可编辑。
           </div>
         </div>
 
