@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+﻿import { useCallback, useEffect, useMemo, useState } from 'react';
+
+export type BatchPolicy = 'off' | 'auto' | 'force';
 
 export interface AISettings {
   provider: 'openai' | 'deepseek' | 'ollama' | 'custom';
@@ -6,18 +8,29 @@ export interface AISettings {
   baseUrl: string;
   model: string;
 
-  /** AI 批处理：每批处理多少个文件（文件量较大时使用） */
+  // Batch runtime controls.
   batchSize: number;
-  /** AI 批处理：并发批次数量上限 */
   concurrencyLimit: number;
+  batchPolicy: BatchPolicy;
+  batchThreshold: number;
 
-  /** 后缀锁定：当新文件名没有扩展名时，自动补全原扩展名 */
+  // Keep original extension for AI-generated names.
   lockSuffix: boolean;
 }
 
 const STORAGE_KEY = 'app-settings';
 
 type StoredPublicSettings = Omit<AISettings, 'apiKey'>;
+
+type LegacyStoredSettings = {
+  provider: AISettings['provider'];
+  baseUrl: string;
+  model: string;
+  batchSize?: number;
+  concurrencyLimit?: number;
+  enableBatchProcessing?: boolean;
+  lockSuffix?: boolean;
+};
 
 const DEFAULT_SETTINGS: AISettings = {
   provider: 'openai',
@@ -26,6 +39,8 @@ const DEFAULT_SETTINGS: AISettings = {
   model: '',
   batchSize: 10,
   concurrencyLimit: 3,
+  batchPolicy: 'off',
+  batchThreshold: 80,
   lockSuffix: true
 };
 
@@ -41,33 +56,55 @@ function isProvider(value: unknown): value is AISettings['provider'] {
   return value === 'openai' || value === 'deepseek' || value === 'ollama' || value === 'custom';
 }
 
+function isBatchPolicy(value: unknown): value is BatchPolicy {
+  return value === 'off' || value === 'auto' || value === 'force';
+}
+
 function parseStoredSettings(raw: string | null): StoredPublicSettings | null {
   if (!raw) return null;
+
   try {
     const parsed: unknown = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object') return null;
-    const obj = parsed as Partial<Record<keyof StoredPublicSettings, unknown>>;
 
-    // 旧版本仅包含 provider/baseUrl/model（保持兼容）
-    if (!isProvider(obj.provider)) return null;
-    if (typeof obj.baseUrl !== 'string') return null;
-    if (typeof obj.model !== 'string') return null;
+    const base = parsed as Partial<Record<keyof StoredPublicSettings, unknown>>;
+    if (!isProvider(base.provider)) return null;
+    if (typeof base.baseUrl !== 'string') return null;
+    if (typeof base.model !== 'string') return null;
+
+    const legacy = parsed as LegacyStoredSettings;
 
     const batchSize =
-      typeof obj.batchSize === 'number' ? obj.batchSize : DEFAULT_SETTINGS.batchSize;
+      typeof base.batchSize === 'number' ? base.batchSize : DEFAULT_SETTINGS.batchSize;
     const concurrencyLimit =
-      typeof obj.concurrencyLimit === 'number'
-        ? obj.concurrencyLimit
+      typeof base.concurrencyLimit === 'number'
+        ? base.concurrencyLimit
         : DEFAULT_SETTINGS.concurrencyLimit;
+
+    const batchPolicy = isBatchPolicy(base.batchPolicy)
+      ? base.batchPolicy
+      : typeof legacy.enableBatchProcessing === 'boolean'
+        ? legacy.enableBatchProcessing
+          ? 'auto'
+          : 'off'
+        : DEFAULT_SETTINGS.batchPolicy;
+
+    const batchThreshold =
+      typeof base.batchThreshold === 'number'
+        ? base.batchThreshold
+        : DEFAULT_SETTINGS.batchThreshold;
+
     const lockSuffix =
-      typeof obj.lockSuffix === 'boolean' ? obj.lockSuffix : DEFAULT_SETTINGS.lockSuffix;
+      typeof base.lockSuffix === 'boolean' ? base.lockSuffix : DEFAULT_SETTINGS.lockSuffix;
 
     return {
-      provider: obj.provider,
-      baseUrl: obj.baseUrl,
-      model: obj.model,
+      provider: base.provider,
+      baseUrl: base.baseUrl,
+      model: base.model,
       batchSize,
       concurrencyLimit,
+      batchPolicy,
+      batchThreshold,
       lockSuffix
     };
   } catch {
@@ -92,6 +129,8 @@ export function useSettings(): {
       model: settings.model,
       batchSize: settings.batchSize,
       concurrencyLimit: settings.concurrencyLimit,
+      batchPolicy: settings.batchPolicy,
+      batchThreshold: settings.batchThreshold,
       lockSuffix: settings.lockSuffix
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(publicSettings));
@@ -101,7 +140,6 @@ export function useSettings(): {
     setSettings((prev) => {
       let next: AISettings = { ...prev, ...partial };
 
-      // 归一化：避免 NaN / 非法范围
       if (partial.batchSize !== undefined) {
         const v = Math.floor(Number(partial.batchSize));
         next.batchSize = Number.isFinite(v) ? Math.min(Math.max(v, 1), 50) : prev.batchSize;
@@ -111,6 +149,15 @@ export function useSettings(): {
         next.concurrencyLimit = Number.isFinite(v)
           ? Math.min(Math.max(v, 1), 10)
           : prev.concurrencyLimit;
+      }
+      if (partial.batchThreshold !== undefined) {
+        const v = Math.floor(Number(partial.batchThreshold));
+        next.batchThreshold = Number.isFinite(v)
+          ? Math.min(Math.max(v, 1), 2000)
+          : prev.batchThreshold;
+      }
+      if (partial.batchPolicy !== undefined && isBatchPolicy(partial.batchPolicy)) {
+        next.batchPolicy = partial.batchPolicy;
       }
       if (partial.lockSuffix !== undefined) {
         next.lockSuffix = Boolean(partial.lockSuffix);
@@ -122,6 +169,7 @@ export function useSettings(): {
           next = { ...next, baseUrl: preset.baseUrl, model: preset.model };
         }
       }
+
       return next;
     });
   }, []);

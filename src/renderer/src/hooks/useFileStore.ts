@@ -7,7 +7,6 @@ import {
   type SetStateAction
 } from 'react';
 import type { FileItem, RenameOrigin, TargetMode } from '@/types/file';
-import { generateNewNames, type AIServiceConfig } from '@/lib/ai-service';
 import { ensureExtension } from '@/lib/filename';
 import { electronApi } from '@/lib/electron-api';
 import {
@@ -42,7 +41,6 @@ export type UseFileStoreResult = {
   targetMode: TargetMode;
   isScanDepthDialogOpen: boolean;
   scanDepthDialogFolderCount: number;
-  isRenaming: boolean;
   isApplying: boolean;
   isUndoing: boolean;
   hasChanges: boolean;
@@ -53,6 +51,7 @@ export type UseFileStoreResult = {
   removeFile: (id: string) => void;
   updateFileName: (id: string, newName: string, origin?: RenameOrigin) => void;
   batchUpdateFileNames: (newNames: string[], origin?: RenameOrigin) => void;
+  patchFileNames: (start: number, newNames: string[], origin?: RenameOrigin) => void;
   clearFiles: () => void;
   discardChanges: () => void;
   revertFileName: (index: number) => void;
@@ -61,8 +60,6 @@ export type UseFileStoreResult = {
   scanDepthRootOnly: () => void;
   scanDepthRecursive: () => void;
   closeScanDepthDialog: () => void;
-  startRenaming: (instruction: string, config?: Partial<AIServiceConfig>) => Promise<void>;
-  stopRenaming: () => void;
   applyRename: () => Promise<{
     successCount: number;
     errors: RenameError[];
@@ -87,12 +84,10 @@ export function useFileStore(options?: UseFileStoreOptions): UseFileStoreResult 
   const [targetMode, setTargetModeRaw] = useState<TargetMode>('file');
   const [isScanDepthDialogOpen, setIsScanDepthDialogOpen] = useState(false);
   const [scanDepthDialogFolderCount, setScanDepthDialogFolderCount] = useState(0);
-  const [isRenaming, setIsRenaming] = useState(false);
   const [isApplying, setIsApplying] = useState(false);
   const [isUndoing, setIsUndoing] = useState(false);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const targetModeRef = useRef<TargetMode>('file');
-  const abortControllerRef = useRef<AbortController | null>(null);
   const highlightTimerRef = useRef<number | null>(null);
   const onFilesIgnoredRef = useRef(options?.onFilesIgnored);
   const lockSuffixRef = useRef(options?.lockSuffix ?? true);
@@ -228,6 +223,22 @@ export function useFileStore(options?: UseFileStoreOptions): UseFileStoreResult 
         prev.map((file, index) => {
           const nextName = newNames[index];
           if (nextName === undefined) return file;
+          if (nextName === file.renamed) return file;
+          return { ...file, renamed: nextName, renameOrigin: origin };
+        })
+      );
+    },
+    [setCurrentFiles]
+  );
+
+  const patchFileNames = useCallback(
+    (start: number, newNames: string[], origin: RenameOrigin = 'rule') => {
+      if (!Number.isFinite(start) || start < 0 || newNames.length === 0) return;
+      setCurrentFiles((prev) =>
+        prev.map((file, index) => {
+          const chunkIndex = index - start;
+          if (chunkIndex < 0 || chunkIndex >= newNames.length) return file;
+          const nextName = newNames[chunkIndex];
           if (nextName === file.renamed) return file;
           return { ...file, renamed: nextName, renameOrigin: origin };
         })
@@ -431,50 +442,6 @@ export function useFileStore(options?: UseFileStoreOptions): UseFileStoreResult 
     });
   }, [addFiles, closeScanDepthDialog]);
 
-  const stopRenaming = useCallback(() => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-      abortControllerRef.current = null;
-    }
-    setIsRenaming(false);
-  }, []);
-
-  const startRenaming = useCallback(
-    async (instruction: string, config?: Partial<AIServiceConfig>) => {
-      const snapshot = currentFilesRef.current;
-      if (snapshot.length === 0) {
-        console.warn('没有文件可重命名');
-        return;
-      }
-
-      if (!instruction.trim()) {
-        console.warn('请输入重命名指令');
-        throw new Error('请输入重命名指令');
-      }
-
-      // 创建 AbortController 用于取消操作
-      abortControllerRef.current = new AbortController();
-
-      setIsRenaming(true);
-
-      try {
-        const originalNames = snapshot.map((f) => f.original);
-        const newNames = await generateNewNames(originalNames, instruction, config);
-
-        // 检查是否被中断
-        if (abortControllerRef.current?.signal.aborted) {
-          return;
-        }
-
-        batchUpdateFileNames(newNames, 'ai');
-      } finally {
-        setIsRenaming(false);
-        abortControllerRef.current = null;
-      }
-    },
-    [batchUpdateFileNames]
-  );
-
   const applyRename = useCallback(async () => {
     const snapshot = currentFilesRef.current;
     const snapshotHasChanges = snapshot.some((f) => f.original !== f.renamed);
@@ -669,7 +636,6 @@ export function useFileStore(options?: UseFileStoreOptions): UseFileStoreResult 
     targetMode,
     isScanDepthDialogOpen,
     scanDepthDialogFolderCount,
-    isRenaming,
     isApplying,
     isUndoing,
     hasChanges,
@@ -680,6 +646,7 @@ export function useFileStore(options?: UseFileStoreOptions): UseFileStoreResult 
     removeFile,
     updateFileName,
     batchUpdateFileNames,
+    patchFileNames,
     clearFiles,
     discardChanges,
     revertFileName,
@@ -688,8 +655,6 @@ export function useFileStore(options?: UseFileStoreOptions): UseFileStoreResult 
     scanDepthRootOnly,
     scanDepthRecursive,
     closeScanDepthDialog,
-    startRenaming,
-    stopRenaming,
     applyRename,
     resetAfterApply,
     undo

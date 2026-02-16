@@ -76,12 +76,10 @@ export function CommandMenu({
                 <span
                   className={cn(
                     'text-[10px] px-1.5 py-0.5 rounded-md border',
-                    preset.type === 'regex'
-                      ? 'border-emerald-200/70 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-300'
-                      : 'border-purple-200/70 bg-purple-50 text-purple-700 dark:border-purple-900/60 dark:bg-purple-950/30 dark:text-purple-300'
+                    'border-blue-200/70 bg-blue-50 text-blue-700 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-300'
                   )}
                 >
-                  {preset.type === 'regex' ? '正则' : 'AI'}
+                  {preset.modeId}
                 </span>
               </div>
 

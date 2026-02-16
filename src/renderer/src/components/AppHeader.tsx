@@ -9,7 +9,7 @@ function Divider(): React.JSX.Element {
 
 export function AppHeader({
   filesLength,
-  isRenaming,
+  isProcessing,
   hasChanges,
   targetMode,
   resolvedTheme,
@@ -19,7 +19,7 @@ export function AppHeader({
   onTargetModeChange
 }: {
   filesLength: number;
-  isRenaming: boolean;
+  isProcessing: boolean;
   hasChanges: boolean;
   targetMode: TargetMode;
   resolvedTheme: 'light' | 'dark';
@@ -51,7 +51,7 @@ export function AppHeader({
       <span className="font-mono text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
         预览文本
       </span>
-      {isRenaming ? (
+      {isProcessing ? (
         <span className="font-mono text-xs text-blue-500 flex items-center gap-1">
           <LoaderIcon className="h-3 w-3 animate-spin" />
           AI 生成中...

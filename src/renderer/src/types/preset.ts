@@ -1,8 +1,8 @@
-export type PresetType = 'regex' | 'prompt';
+import type { Mode } from '@/types/mode';
 
 export interface Preset {
   id: string;
   name: string;
   content: string;
-  type: PresetType;
+  modeId: Mode;
 }

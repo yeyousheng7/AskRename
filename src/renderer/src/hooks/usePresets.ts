@@ -1,32 +1,37 @@
-import { useCallback, useSyncExternalStore } from 'react';
+﻿import { useCallback, useSyncExternalStore } from 'react';
 import type { Preset } from '@/types/preset';
+import { isMode } from '@/types/mode';
+import { getModeList } from '@/modes/registry';
 
 const STORAGE_KEY = 'app-presets';
+const modeList = getModeList();
+const defaultRuleModeId =
+  modeList.find((item) => item.meta.ui?.showHistoryDrawer === false)?.id ?? modeList[0]?.id ?? 'ai';
 
 const DEFAULT_PRESETS: Preset[] = [
   {
     id: 'sys-remove-spaces',
     name: '移除空格',
     content: '\\s+',
-    type: 'regex'
+    modeId: defaultRuleModeId
   },
   {
     id: 'sys-lowercase',
     name: '转为小写',
     content: '将文件名全部转为小写',
-    type: 'prompt'
+    modeId: 'ai'
   },
   {
     id: 'sys-date-format',
     name: '规范日期',
     content: '从文件名中提取日期并格式化为 YYYY-MM-DD 格式',
-    type: 'prompt'
+    modeId: 'ai'
   },
   {
     id: 'sys-snake-case',
     name: '蛇形命名',
     content: '转换为 snake_case 格式',
-    type: 'prompt'
+    modeId: 'ai'
   }
 ];
 
@@ -43,17 +48,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
-function isPresetType(value: unknown): value is Preset['type'] {
-  return value === 'regex' || value === 'prompt';
-}
-
 function isPresetLike(value: unknown): value is Preset {
   if (!isRecord(value)) return false;
+  if (!isMode(value.modeId)) return false;
   return (
     typeof value.id === 'string' &&
     typeof value.name === 'string' &&
     typeof value.content === 'string' &&
-    isPresetType(value.type)
+    value.modeId.trim().length > 0
   );
 }
 
@@ -62,7 +64,6 @@ function parseStoredPresets(raw: string | null): Preset[] | null {
   try {
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return null;
-
     if (!parsed.every(isPresetLike)) return null;
     return parsed as Preset[];
   } catch {

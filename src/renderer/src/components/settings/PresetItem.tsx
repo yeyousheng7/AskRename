@@ -1,7 +1,8 @@
-import { PencilIcon, TrashIcon } from 'lucide-react';
+﻿import { PencilIcon, TrashIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { Preset } from '@/types/preset';
 import { cn } from '@/lib/utils';
+import { getModeById } from '@/modes/registry';
 
 export function PresetItem({
   preset,
@@ -13,9 +14,15 @@ export function PresetItem({
   onDelete: () => void;
 }): React.JSX.Element {
   const isSystem = preset.id.startsWith('sys-');
-  const typeLabel = preset.type === 'regex' ? '正则' : 'AI';
+  const modeLabel = (() => {
+    try {
+      return getModeById(preset.modeId).meta.label;
+    } catch {
+      return preset.modeId;
+    }
+  })();
   const truncatedContent =
-    preset.content.length > 40 ? preset.content.slice(0, 40) + '…' : preset.content;
+    preset.content.length > 40 ? `${preset.content.slice(0, 40)}...` : preset.content;
 
   return (
     <div
@@ -30,15 +37,8 @@ export function PresetItem({
           <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate">
             {preset.name}
           </span>
-          <span
-            className={cn(
-              'px-1.5 py-0.5 text-[10px] font-medium rounded',
-              preset.type === 'regex'
-                ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400'
-                : 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-400'
-            )}
-          >
-            {typeLabel}
+          <span className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-400">
+            {modeLabel}
           </span>
           {isSystem && (
             <span className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-zinc-200 text-zinc-600 dark:bg-zinc-700 dark:text-zinc-400">

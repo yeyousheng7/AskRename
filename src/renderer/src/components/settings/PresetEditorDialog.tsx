@@ -1,9 +1,11 @@
-import { useState } from 'react';
+﻿import { useMemo, useState } from 'react';
 import { XIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { isMode } from '@/types/mode';
 import type { Preset } from '@/types/preset';
 import { cn } from '@/lib/utils';
+import { getModeList } from '@/modes/registry';
 
 const labelClass = 'text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5';
 const fieldGap = 'space-y-2';
@@ -17,16 +19,17 @@ export function PresetEditorDialog({
   onSave: (data: Omit<Preset, 'id'>) => void;
   onCancel: () => void;
 }): React.JSX.Element {
+  const modeList = useMemo(() => getModeList(), []);
   const [name, setName] = useState(preset?.name ?? '');
   const [content, setContent] = useState(preset?.content ?? '');
-  const [type, setType] = useState<Preset['type']>(preset?.type ?? 'prompt');
+  const [modeId, setModeId] = useState(preset?.modeId ?? 'ai');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleSubmit = (): void => {
     if (!name.trim() || !content.trim()) return;
     if (isSubmitting) return;
     setIsSubmitting(true);
-    onSave({ name: name.trim(), content: content.trim(), type });
+    onSave({ name: name.trim(), content: content.trim(), modeId });
   };
 
   const selectClass = cn(
@@ -60,14 +63,20 @@ export function PresetEditorDialog({
           </div>
 
           <div className={fieldGap}>
-            <label className={labelClass}>类型</label>
+            <label className={labelClass}>模式</label>
             <select
               className={selectClass}
-              value={type}
-              onChange={(e) => setType(e.target.value as Preset['type'])}
+              value={modeId}
+              onChange={(e) => {
+                const next = e.target.value;
+                if (isMode(next)) setModeId(next);
+              }}
             >
-              <option value="prompt">AI 提示词</option>
-              <option value="regex">正则表达式</option>
+              {modeList.map((mode) => (
+                <option key={mode.id} value={mode.id}>
+                  {mode.meta.label}
+                </option>
+              ))}
             </select>
           </div>
 
@@ -76,7 +85,7 @@ export function PresetEditorDialog({
             <textarea
               value={content}
               onChange={(e) => setContent(e.target.value)}
-              placeholder={type === 'regex' ? '正则表达式...' : 'AI 提示词内容...'}
+              placeholder="预设内容..."
               className={cn(
                 'w-full h-24 rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none resize-none',
                 'focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]',

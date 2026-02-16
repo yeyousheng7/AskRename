@@ -55,8 +55,8 @@ export function getElectronFilePath(file: File): string {
     // ignore
   }
 
-  const legacy = file as unknown as { path?: string };
-  return (legacy.path || '').trim();
+  const compatibilityFile = file as unknown as { path?: string };
+  return (compatibilityFile.path || '').trim();
 }
 
 export function toFileItemsFromDataTransferFiles(

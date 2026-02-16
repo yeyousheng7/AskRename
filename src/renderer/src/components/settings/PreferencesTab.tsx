@@ -1,7 +1,7 @@
-import { useCallback } from 'react';
+﻿import { useCallback } from 'react';
 
 import { Input } from '@/components/ui/input';
-import type { AISettings } from '@/hooks/useSettings';
+import type { AISettings, BatchPolicy } from '@/hooks/useSettings';
 
 const labelClass = 'text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5';
 const helpClass = 'text-xs text-zinc-500 dark:text-zinc-400 mt-1.5 leading-5';
@@ -13,6 +13,12 @@ function clampInt(value: number, min: number, max: number, fallback: number): nu
   return Math.min(Math.max(v, min), max);
 }
 
+function getBatchPolicyLabel(policy: BatchPolicy): string {
+  if (policy === 'off') return '关闭';
+  if (policy === 'auto') return '自动（超阈值启用）';
+  return '强制（始终分批）';
+}
+
 export function PreferencesTab({
   settings,
   updateSettings
@@ -22,7 +28,6 @@ export function PreferencesTab({
 }): React.JSX.Element {
   const handleBatchSizeChange = useCallback(
     (raw: string) => {
-      // 空输入时先回退到最小值，避免把 settings 置为 NaN
       const next = clampInt(raw === '' ? 1 : Number(raw), 1, 50, settings.batchSize);
       updateSettings({ batchSize: next });
     },
@@ -37,13 +42,51 @@ export function PreferencesTab({
     [settings.concurrencyLimit, updateSettings]
   );
 
+  const handleBatchThresholdChange = useCallback(
+    (raw: string) => {
+      const next = clampInt(raw === '' ? 1 : Number(raw), 1, 2000, settings.batchThreshold);
+      updateSettings({ batchThreshold: next });
+    },
+    [settings.batchThreshold, updateSettings]
+  );
+
+  const batchEnabled = settings.batchPolicy !== 'off';
+
   return (
     <div className="space-y-8">
       <div className="space-y-4">
         <div>
           <div className="text-base font-semibold text-zinc-900 dark:text-zinc-50">AI 批处理</div>
+          <div className={helpClass}>仅作用于 AI 与智能模式。Regex 模式不使用分批执行。</div>
+        </div>
+
+        <div className={fieldGap}>
+          <label className={labelClass}>分批策略</label>
+          <select
+            value={settings.batchPolicy}
+            onChange={(e) => updateSettings({ batchPolicy: e.target.value as BatchPolicy })}
+            className="h-10 w-full rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 text-sm text-zinc-900 dark:text-zinc-100"
+          >
+            <option value="off">关闭</option>
+            <option value="auto">自动（超阈值启用）</option>
+            <option value="force">强制（始终分批）</option>
+          </select>
+          <div className={helpClass}>当前：{getBatchPolicyLabel(settings.batchPolicy)}</div>
+        </div>
+
+        <div className={fieldGap}>
+          <label className={labelClass}>分批阈值</label>
+          <Input
+            type="number"
+            min={1}
+            max={2000}
+            step={1}
+            disabled={!batchEnabled}
+            value={String(settings.batchThreshold)}
+            onChange={(e) => handleBatchThresholdChange(e.target.value)}
+          />
           <div className={helpClass}>
-            这些设置仅影响“文件数量较大时”的 AI 批量处理（会拆分为多个批次并发请求）。
+            仅在“自动”策略下生效：文件总数达到该值时启用分批。关闭策略时不可编辑。
           </div>
         </div>
 
@@ -59,7 +102,7 @@ export function PreferencesTab({
               onChange={(e) => handleBatchSizeChange(e.target.value)}
             />
             <div className={helpClass}>
-              每个批次包含的文件数。越大越省请求次数，但单次耗时/失败重试成本更高。
+              每个批次包含的文件数量。越大请求次数越少，但单批失败重试成本更高。
             </div>
           </div>
 
@@ -73,9 +116,7 @@ export function PreferencesTab({
               value={String(settings.concurrencyLimit)}
               onChange={(e) => handleConcurrencyChange(e.target.value)}
             />
-            <div className={helpClass}>
-              同时进行的批次数量。越大越快，但更容易触发限流或占用更多资源。
-            </div>
+            <div className={helpClass}>同时进行的批次数量。越大越快，但更容易触发限流。</div>
           </div>
         </div>
       </div>
@@ -99,7 +140,6 @@ export function PreferencesTab({
               </div>
               <div className={helpClass}>
                 如果文件存在扩展名，锁定扩展名，仅对 AI 自动建议生效。
-                人工干预规则（如修改正则）或手动重命名不受限制。
               </div>
             </span>
           </label>

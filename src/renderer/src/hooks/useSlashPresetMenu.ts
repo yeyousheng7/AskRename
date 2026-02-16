@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, type RefObject } from 'react';
+﻿import { useCallback, useMemo, useState, type RefObject } from 'react';
 import type { Preset } from '@/types/preset';
 import type { Mode } from '@/types/mode';
 
@@ -8,16 +8,14 @@ export function useSlashPresetMenu({
   inputRef,
   onModeChange,
   onInstructionChange,
-  onFindPatternChange,
-  onReplacePatternChange
+  onPresetSelect
 }: {
   instruction: string;
   presets: Preset[];
   inputRef: RefObject<HTMLTextAreaElement | null>;
   onModeChange: (mode: Mode) => void;
   onInstructionChange: (next: string) => void;
-  onFindPatternChange: (next: string) => void;
-  onReplacePatternChange: (next: string) => void;
+  onPresetSelect: (preset: Preset) => void;
 }): {
   isOpen: boolean;
   filteredPresets: Preset[];
@@ -61,25 +59,13 @@ export function useSlashPresetMenu({
 
   const handleSelect = useCallback(
     (preset: Preset) => {
-      if (preset.type === 'regex') {
-        onModeChange('regex');
-        onFindPatternChange(preset.content);
-        onReplacePatternChange('');
-        onInstructionChange('');
-      } else {
-        onInstructionChange(preset.content);
-      }
+      onModeChange(preset.modeId);
+      onPresetSelect(preset);
+      onInstructionChange('');
       close();
       setTimeout(() => inputRef.current?.focus(), 50);
     },
-    [
-      close,
-      inputRef,
-      onFindPatternChange,
-      onInstructionChange,
-      onModeChange,
-      onReplacePatternChange
-    ]
+    [close, inputRef, onInstructionChange, onModeChange, onPresetSelect]
   );
 
   const handleKeyDown = useCallback(

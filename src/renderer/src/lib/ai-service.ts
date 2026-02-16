@@ -1,33 +1,24 @@
-/**
- * AI 重命名服务
- * 通过 IPC 调用主进程 API，绕过 CORS/CSP 限制
- */
-
-// ============================================================================
-// 类型定义
-// ============================================================================
-
-import type { AIChatResponse, AIChatSettings, ChatMessage } from '@shared/ipc-types';
+﻿import type { AIChatResponse, AIChatSettings, ChatMessage } from '@shared/ipc-types';
 import { electronApi } from '@/lib/electron-api';
+import { SMART_DECISION_SYSTEM_PROMPT } from '@/modes/smart/decision-prompt';
+import type { SmartDecision } from '@/types/types';
 
 export type AIProvider = 'openai' | 'deepseek' | 'ollama' | 'custom';
-
-export type RegexAssistResult = { find: string; replace: string };
 
 export interface AIServiceConfig {
   provider: AIProvider;
   apiKey: string;
   baseURL: string;
   model: string;
-  /** 是否启用 JSON 模式（DeepSeek 推荐开启） */
   jsonMode: boolean;
-  /** 最大 token 数，防止 JSON 被截断 */
   maxTokens: number;
 }
 
-// ============================================================================
-// 预设配置
-// ============================================================================
+interface BatchPromptContext {
+  requestId?: string;
+  startIndex?: number; // 1-based
+  totalCount?: number;
+}
 
 const PROVIDER_PRESETS: Record<AIProvider, Omit<AIServiceConfig, 'apiKey'>> = {
   openai: {
@@ -60,14 +51,8 @@ const PROVIDER_PRESETS: Record<AIProvider, Omit<AIServiceConfig, 'apiKey'>> = {
   }
 };
 
-// ============================================================================
-// System Prompt（包含 JSON 示例，兼容 DeepSeek JSON Output 要求）
-// ============================================================================
-
 export const AI_SYSTEM_PROMPT = `你是一个文件名批处理助手。用户会提供文件列表和修改指令。
-
 你必须返回一个纯 JSON 字符串数组，包含修改后的文件名。数组长度必须与输入文件严格一致。
-
 EXAMPLE INPUT:
 文件列表：["photo_001.jpg", "photo_002.jpg"]
 修改指令：添加日期前缀 2024-01-15
@@ -80,13 +65,6 @@ EXAMPLE JSON OUTPUT:
 - 数组长度必须与输入文件数量完全相同
 - 保持文件扩展名不变（除非用户明确要求修改）`;
 
-// ============================================================================
-// 配置管理
-// ============================================================================
-
-/**
- * 从环境变量获取配置
- */
 export function getConfigFromEnv(): AIServiceConfig {
   const provider = (import.meta.env.VITE_AI_PROVIDER as AIProvider) || 'deepseek';
   const preset = PROVIDER_PRESETS[provider] || PROVIDER_PRESETS.custom;
@@ -102,16 +80,10 @@ export function getConfigFromEnv(): AIServiceConfig {
   };
 }
 
-/**
- * 获取指定厂商的预设配置
- */
 export function getProviderPreset(provider: AIProvider): Omit<AIServiceConfig, 'apiKey'> {
   return { ...PROVIDER_PRESETS[provider] };
 }
 
-/**
- * 获取所有支持的厂商列表
- */
 export function getSupportedProviders(): { id: AIProvider; name: string }[] {
   return [
     { id: 'openai', name: 'OpenAI' },
@@ -121,54 +93,92 @@ export function getSupportedProviders(): { id: AIProvider; name: string }[] {
   ];
 }
 
-// ============================================================================
-// 核心 API（通过 IPC 调用主进程）
-// ============================================================================
+function ensureConfig(config: AIServiceConfig): void {
+  if (config.provider !== 'ollama' && !config.apiKey) {
+    throw new Error('API Key 未配置，请在设置中填写 API Key');
+  }
+  if (!config.baseURL) {
+    throw new Error('API Base URL 未配置');
+  }
+  if (!config.model) {
+    throw new Error('模型名称未配置');
+  }
+}
 
-/**
- * 调用 AI 生成新文件名
- * @param files - 原始文件名数组
- * @param userInstruction - 用户的重命名指令
- * @param config - API 配置（可选，默认从环境变量读取）
- * @returns 新文件名数组
- */
+function parseJson(content: string): unknown {
+  const cleanedContent = content
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim();
+  return JSON.parse(cleanedContent);
+}
+
+function parseAndValidateNameList(content: string, expectedLength: number): string[] {
+  let parsed: unknown;
+  try {
+    parsed = parseJson(content);
+  } catch {
+    throw new Error(
+      `AI 生成格式错误，无法解析 JSON，请重试。原始输出: ${content.slice(0, 100)}...`
+    );
+  }
+
+  if (!Array.isArray(parsed)) {
+    throw new Error('AI 生成格式错误：返回值必须是数组，请重试');
+  }
+
+  if (parsed.length !== expectedLength) {
+    throw new Error(
+      `AI 生成格式错误：返回数组长度 (${parsed.length}) 与输入文件数量 (${expectedLength}) 不匹配，请重试`
+    );
+  }
+
+  return parsed.map((name, index) => {
+    if (typeof name !== 'string') {
+      throw new Error(`AI 生成格式错误：第 ${index + 1} 个文件名不是字符串，请重试`);
+    }
+    return name;
+  });
+}
+
 export async function generateNewNames(
   files: string[],
   userInstruction: string,
-  config?: Partial<AIServiceConfig>
+  config?: Partial<AIServiceConfig>,
+  context?: BatchPromptContext
 ): Promise<string[]> {
   const finalConfig: AIServiceConfig = { ...getConfigFromEnv(), ...config };
   const { provider, apiKey, baseURL, model, jsonMode, maxTokens } = finalConfig;
 
-  if (provider !== 'ollama' && !apiKey) {
-    throw new Error('API Key 未配置，请在设置中填写 API Key');
-  }
-
-  if (!baseURL) {
-    throw new Error('API Base URL 未配置');
-  }
-
-  if (!model) {
-    throw new Error('模型名称未配置');
-  }
+  ensureConfig(finalConfig);
 
   if (files.length === 0) {
     return [];
   }
 
-  const userMessage = `文件列表：${JSON.stringify(files)}
-
-修改指令：${userInstruction}`;
+  const safeStartIndex = Number.isFinite(context?.startIndex)
+    ? Math.max(1, Math.floor(context?.startIndex ?? 1))
+    : undefined;
+  const safeTotalCount = Number.isFinite(context?.totalCount)
+    ? Math.max(files.length, Math.floor(context?.totalCount ?? files.length))
+    : undefined;
+  const batchIndexHint = safeStartIndex
+    ? `\n\n全局序号信息：当前批第一个文件在全量列表中的位置是第 ${safeStartIndex} 个（从 1 开始）。` +
+      `${safeTotalCount ? ` 全量文件总数约为 ${safeTotalCount} 个。` : ''}` +
+      '\n如果用户要求添加序号/编号，请基于该全局起始位置连续编号，不要每批从 1 重新开始。'
+    : '';
+  const userMessage =
+    `文件列表：${JSON.stringify(files)}\n\n修改指令：${userInstruction}` + batchIndexHint;
 
   const messages: ChatMessage[] = [
     { role: 'system', content: AI_SYSTEM_PROMPT },
     { role: 'user', content: userMessage }
   ];
 
-  // 通过 IPC 调用主进程
   const response: AIChatResponse = await electronApi.askAI(
     { provider, apiKey, baseURL, model, jsonMode, maxTokens } satisfies AIChatSettings,
-    messages
+    messages,
+    context?.requestId
   );
 
   if (!response.success) {
@@ -179,143 +189,197 @@ export async function generateNewNames(
     throw new Error('AI 返回内容为空，请尝试修改指令后重试');
   }
 
-  return parseAndValidateResponse(response.content, files.length);
+  return parseAndValidateNameList(response.content, files.length);
 }
 
-// ============================================================================
-// 响应解析
-// ============================================================================
+export async function generateNewNamesBatched(
+  files: string[],
+  userInstruction: string,
+  config?: Partial<AIServiceConfig>,
+  options?: {
+    batchSize?: number;
+    concurrencyLimit?: number;
+    continueOnError?: boolean;
+  }
+): Promise<{ names: string[]; errors: Array<{ batchIndex: number; message: string }> }> {
+  if (files.length === 0) {
+    return { names: [], errors: [] };
+  }
 
-/**
- * 解析并验证 AI 响应
- */
-function parseAndValidateResponse(content: string, expectedLength: number): string[] {
-  let newNames: unknown;
+  const batchSize = Math.min(Math.max(Math.floor(options?.batchSize ?? 10), 1), 50);
+  const concurrencyLimit = Math.min(Math.max(Math.floor(options?.concurrencyLimit ?? 3), 1), 10);
+  const continueOnError = options?.continueOnError ?? true;
+
+  const batches: Array<{ batchIndex: number; start: number; items: string[] }> = [];
+  for (let start = 0, batchIndex = 0; start < files.length; start += batchSize, batchIndex++) {
+    const end = Math.min(start + batchSize, files.length);
+    batches.push({ batchIndex, start, items: files.slice(start, end) });
+  }
+
+  const names = new Array<string>(files.length);
+  const errors: Array<{ batchIndex: number; message: string }> = [];
+  let cursor = 0;
+  let hardError: Error | null = null;
+
+  const runWorker = async (): Promise<void> => {
+    while (cursor < batches.length) {
+      const current = cursor;
+      cursor += 1;
+      const batch = batches[current];
+      if (!batch) continue;
+
+      try {
+        const batchNames = await generateNewNames(batch.items, userInstruction, config, {
+          startIndex: batch.start + 1,
+          totalCount: files.length
+        });
+        batchNames.forEach((value, offset) => {
+          names[batch.start + offset] = value;
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : '批次处理失败';
+        errors.push({ batchIndex: batch.batchIndex, message });
+
+        if (!continueOnError) {
+          hardError = new Error(`第 ${batch.batchIndex + 1} 批处理失败：${message}`);
+          return;
+        }
+
+        batch.items.forEach((value, offset) => {
+          names[batch.start + offset] = value;
+        });
+      }
+    }
+  };
+
+  const workerCount = Math.min(concurrencyLimit, batches.length);
+  await Promise.all(Array.from({ length: workerCount }, () => runWorker()));
+
+  if (hardError) throw hardError;
+
+  for (let index = 0; index < names.length; index++) {
+    if (typeof names[index] !== 'string') {
+      names[index] = files[index] ?? '';
+    }
+  }
+
+  return { names, errors };
+}
+
+function normalizeDecisionRegexFind(findRaw: string): string {
+  const trimmed = findRaw.trim();
+  if (!trimmed) return '';
+
+  const wrappedPattern = trimmed.match(/^\/(.+)\/([a-z]*)$/i);
+  if (!wrappedPattern) return trimmed;
+
+  const pattern = wrappedPattern[1] ?? '';
+  const flags = wrappedPattern[2] ?? '';
+  const unsupportedFlags = flags.replace(/g/gi, '');
+  if (unsupportedFlags.length > 0) {
+    throw new Error(`AI 决策格式错误：regex 规则不支持 flags "${flags}"，请仅返回纯模式字符串`);
+  }
+
+  return pattern.trim();
+}
+
+function parseAutoDecisionResponse(content: string): SmartDecision {
+  let decision: unknown;
 
   try {
-    // 移除可能的 markdown 代码块标记（兼容未开启 JSON 模式的情况）
-    const cleanedContent = content
-      .replace(/^```(?:json)?\s*/i, '')
-      .replace(/\s*```$/i, '')
-      .trim();
-
-    newNames = JSON.parse(cleanedContent);
+    decision = parseJson(content);
   } catch {
-    throw new Error(
-      `AI 生成格式错误，无法解析 JSON，请重试。原始输出: ${content.slice(0, 100)}...`
-    );
+    throw new Error(`AI 决策格式错误，无法解析 JSON。原始输出: ${content.slice(0, 100)}...`);
   }
 
-  // 验证返回格式
-  if (!Array.isArray(newNames)) {
-    throw new Error('AI 生成格式错误：返回值必须是数组，请重试');
+  if (typeof decision !== 'object' || decision === null) {
+    throw new Error('AI 决策格式错误：返回值必须是对象');
   }
 
-  if (newNames.length !== expectedLength) {
-    throw new Error(
-      `AI 生成格式错误：返回数组长度 (${newNames.length}) 与输入文件数量 (${expectedLength}) 不匹配，请重试`
-    );
+  const obj = decision as Record<string, unknown>;
+  if (obj.type !== 'regex' && obj.type !== 'list') {
+    throw new Error('AI 决策格式错误：type 必须是 "regex" 或 "list"（严格新协议）');
   }
 
-  // 确保每个元素都是字符串
-  return newNames.map((name, index) => {
-    if (typeof name !== 'string') {
-      throw new Error(`AI 生成格式错误：第 ${index + 1} 个文件名不是字符串，请重试`);
+  if (obj.type === 'list') {
+    if (!Array.isArray(obj.names)) {
+      throw new Error('AI 决策格式错误：list 类型缺少 names 数组');
     }
-    return name;
-  });
+    const names = obj.names.map((item, index) => {
+      if (typeof item !== 'string') {
+        throw new Error(`AI 决策格式错误：第 ${index + 1} 个文件名不是字符串`);
+      }
+      return item;
+    });
+    return { type: 'list', names };
+  }
+
+  if (typeof obj.payload !== 'object' || obj.payload === null) {
+    throw new Error('AI 决策格式错误：regex 类型缺少 payload 对象');
+  }
+  const payloadObj = obj.payload as Record<string, unknown>;
+  const findRaw = payloadObj.find;
+  const replaceRaw = payloadObj.replace;
+
+  if (typeof findRaw !== 'string') {
+    throw new Error('AI 决策格式错误：regex 类型缺少 payload.find 字段');
+  }
+  if (typeof replaceRaw !== 'string') {
+    throw new Error('AI 决策格式错误：regex 类型缺少 payload.replace 字段');
+  }
+  const normalizedFind = normalizeDecisionRegexFind(findRaw);
+  if (!normalizedFind) {
+    throw new Error('AI 决策格式错误：regex 类型的 payload.find 不能为空');
+  }
+
+  return {
+    type: 'regex',
+    payload: {
+      find: normalizedFind,
+      replace: replaceRaw
+    }
+  };
 }
 
-// ============================================================================
-// Auto Mode 决策引擎
-// ============================================================================
-
-import type { AIDecision } from '@shared/ipc-types';
-
-// Re-export for external use
-export type { AIDecision };
-
-/** 决策模式采样数量：只发送前 N 个文件名给 AI 以节省 Token */
-const DECISION_SAMPLE_SIZE = 20;
-
-/** 决策型 System Prompt */
-const AUTO_DECISION_PROMPT = `你是文件重命名助手。请分析用户的指令，判断能否用正则表达式（JavaScript 语法）解决。
-
-判断规则：
-- 正则适用场景：删除数字、替换特定字符、添加前后缀、大小写转换、简单模式提取、添加序号/编号等
-- AI 适用场景：翻译、理解文件内容、复杂语义理解、需要上下文推理的任务
-
-魔法变量（正则模式专属）：
-你可以在 replace 字段中使用以下变量来生成序号：
-- \${i} → 序号 (1, 2, 3...)
-- \${i0} → 双位序号 (01, 02, 03...)
-- \${i00} → 三位序号 (001, 002...)
-- \${i000} → 四位序号 (0001...)
-
-响应格式（只返回 JSON，不要任何解释）：
-
-正则任务示例：
-{"type":"regex","find":"\\\\d+","replace":""}
-
-添加序号示例：
-{"type":"regex","find":"^","replace":"\${i0}_"}
-
-AI 任务示例：
-{"type":"list","names":["新名称1.txt","新名称2.txt"]}
-
-规则：
-- 如果用户要求添加序号、编号或排序，优先使用正则模式 + 魔法变量
-- 如果返回 list 类型，names 数组长度必须与输入文件数量完全一致
-- 正则表达式使用 JavaScript 语法，会自动添加 g 标志
-- 只输出 JSON，不要任何解释或 markdown 标记`;
-
-/**
- * 调用 AI 获取重命名决策
- * @param files - 原始文件名数组（只发送前 20 个作为样本）
- * @param userInstruction - 用户的重命名指令
- * @param config - API 配置
- * @returns AI 决策结果（regex 或 list）
- */
 export async function generateAutoDecision(
   files: string[],
   userInstruction: string,
   config?: Partial<AIServiceConfig>,
-  requestId?: string
-): Promise<AIDecision> {
+  requestId?: string,
+  options?: {
+    startIndex?: number; // 1-based, for batched decision context
+    totalCount?: number;
+  }
+): Promise<SmartDecision> {
   const finalConfig: AIServiceConfig = { ...getConfigFromEnv(), ...config };
   const { provider, apiKey, baseURL, model, jsonMode, maxTokens } = finalConfig;
 
-  if (provider !== 'ollama' && !apiKey) {
-    throw new Error('API Key 未配置，请在设置中填写 API Key');
-  }
-
-  if (!baseURL) {
-    throw new Error('API Base URL 未配置');
-  }
-
-  if (!model) {
-    throw new Error('模型名称未配置');
-  }
+  ensureConfig(finalConfig);
 
   if (files.length === 0) {
     throw new Error('没有文件需要重命名');
   }
 
-  // 只发送前 N 个文件名作为样本，节省 Token
-  const sampleFiles = files.slice(0, DECISION_SAMPLE_SIZE);
+  const decisionFiles = files;
   const totalCount = files.length;
+  const safeStartIndex = Number.isFinite(options?.startIndex)
+    ? Math.max(1, Math.floor(options?.startIndex ?? 1))
+    : undefined;
+  const decisionTotalCount = Number.isFinite(options?.totalCount)
+    ? Math.max(totalCount, Math.floor(options?.totalCount ?? totalCount))
+    : totalCount;
+  const batchIndexHint = safeStartIndex
+    ? `\n\n全局序号信息：当前批第一个文件在全量列表中的位置是第 ${safeStartIndex} 个（从 1 开始），全量文件总数约为 ${decisionTotalCount} 个。` +
+      '\n如果用户要求编号/序号，请据此判断是否应保持全局连续。'
+    : '';
 
-  const userMessage = `文件列表（共 ${totalCount} 个，显示前 ${sampleFiles.length} 个）：
-${JSON.stringify(sampleFiles)}
-
-修改指令：${userInstruction}`;
+  const userMessage = `文件列表（共 ${totalCount} 个）：${JSON.stringify(decisionFiles)}\n\n修改指令：${userInstruction}\n\n若输出 type="list"，names 必须与文件数量一致。${batchIndexHint}`;
 
   const messages: ChatMessage[] = [
-    { role: 'system', content: AUTO_DECISION_PROMPT },
+    { role: 'system', content: SMART_DECISION_SYSTEM_PROMPT },
     { role: 'user', content: userMessage }
   ];
 
-  // 通过 IPC 调用主进程
   const response = await electronApi.askAI(
     { provider, apiKey, baseURL, model, jsonMode, maxTokens },
     messages,
@@ -330,60 +394,5 @@ ${JSON.stringify(sampleFiles)}
     throw new Error('AI 返回内容为空，请尝试修改指令后重试');
   }
 
-  return parseAutoDecisionResponse(response.content, sampleFiles.length);
-}
-
-/**
- * 解析 AI 决策响应
- */
-function parseAutoDecisionResponse(content: string, sampleLength: number): AIDecision {
-  let decision: unknown;
-
-  try {
-    const cleanedContent = content
-      .replace(/^```(?:json)?\s*/i, '')
-      .replace(/\s*```$/i, '')
-      .trim();
-
-    decision = JSON.parse(cleanedContent);
-  } catch {
-    throw new Error(`AI 决策格式错误，无法解析 JSON。原始输出: ${content.slice(0, 100)}...`);
-  }
-
-  // 验证返回格式
-  if (typeof decision !== 'object' || decision === null) {
-    throw new Error('AI 决策格式错误：返回值必须是对象');
-  }
-
-  const obj = decision as Record<string, unknown>;
-
-  if (obj.type === 'regex') {
-    if (typeof obj.find !== 'string') {
-      throw new Error('AI 决策格式错误：regex 类型缺少 find 字段');
-    }
-    if (typeof obj.replace !== 'string') {
-      throw new Error('AI 决策格式错误：regex 类型缺少 replace 字段');
-    }
-    return { type: 'regex', find: obj.find, replace: obj.replace };
-  }
-
-  if (obj.type === 'list') {
-    if (!Array.isArray(obj.names)) {
-      throw new Error('AI 决策格式错误：list 类型缺少 names 数组');
-    }
-    if (obj.names.length !== sampleLength) {
-      throw new Error(
-        `AI 决策格式错误：names 数组长度 (${obj.names.length}) 与样本数量 (${sampleLength}) 不匹配`
-      );
-    }
-    const names = obj.names.map((n, i) => {
-      if (typeof n !== 'string') {
-        throw new Error(`AI 决策格式错误：第 ${i + 1} 个文件名不是字符串`);
-      }
-      return n;
-    });
-    return { type: 'list', names };
-  }
-
-  throw new Error(`AI 决策格式错误：未知类型 "${obj.type}"，应为 "regex" 或 "list"`);
+  return parseAutoDecisionResponse(response.content);
 }

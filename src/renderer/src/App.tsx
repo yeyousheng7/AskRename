@@ -1,11 +1,10 @@
-﻿import { useCallback, useEffect, useRef, useState } from 'react';
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useFileStore } from '@/hooks/useFileStore';
 import { useTheme } from '@/hooks/useTheme';
 import { useSettings } from '@/hooks/useSettings';
 import FileList from '@/components/FileList';
 import { ProgressOverlay } from '@/components/ProgressOverlay';
-import { SmartWarningDialog } from '@/components/SmartWarningDialog';
 import { ScanDepthDialog } from '@/components/ScanDepthDialog';
 import { PaginationBar } from '@/components/PaginationBar';
 import { SettingsDialog } from '@/components/SettingsDialog';
@@ -18,20 +17,22 @@ import { useToast } from '@/hooks/useToast';
 import { useSessionHistory } from '@/hooks/useSessionHistory';
 import { useFileDragOverlay } from '@/hooks/useFileDragOverlay';
 import { useEvent } from '@/hooks/useEvent';
+import { useFooterController } from '@/hooks/useFooterController';
 import { useBatchAI } from '@/hooks/useBatchAI';
 import { electronApi } from '@/lib/electron-api';
-import { generateAutoDecision, getConfigFromEnv } from '@/lib/ai-service';
-import { generateRegexFromDescription } from '@/lib/regex-assist';
+import { getConfigFromEnv } from '@/lib/ai-service';
 import { cn } from '@/lib/utils';
 import {
-  computeRegexPreviewNames,
+  buildModePreview,
   executeModeStrategy,
-  resolveReorderMagicPreview
+  getModeById,
+  getModeSubmitInput,
+  normalizeModePayload
 } from '@/modes/registry';
-import type { AISessionState, PendingDecision } from '@/types/ai';
+import type { FileItem } from '@/types/file';
 import type { Mode } from '@/types/mode';
 import type { SettingsTabId } from '@/types/settings';
-import type { RegexSubmitParams, TextSubmitParams } from '@renderer/types/types';
+import type { AIChatSettings } from '@shared/ipc-types';
 
 // ============================================================================
 // App 主组件
@@ -39,22 +40,26 @@ import type { RegexSubmitParams, TextSubmitParams } from '@renderer/types/types'
 
 const PAGINATION_THRESHOLD = 100;
 const DEFAULT_PAGE_SIZE = 50;
+const INITIAL_SMART_PAYLOAD = { instruction: '' };
+type SmartHandoffState = { find: string; replace: string };
+
+function extractInstruction(payload: unknown): string {
+  if (!payload || typeof payload !== 'object' || !('instruction' in payload)) return '';
+  const value = (payload as { instruction?: unknown }).instruction;
+  return typeof value === 'string' ? value : '';
+}
 
 function App(): React.JSX.Element {
-  // 模式状态：smart(智能) | ai(纯AI) | regex(纯正则)
+  // 当前选择的重命名模式
   const [mode, setMode] = useState<Mode>('smart');
 
-  // AI Session 状态：智能模式下的会话状态机
-  const [aiSession, setAISession] = useState<AISessionState>('idle');
-  const [pendingDecision, setPendingDecision] = useState<PendingDecision>(null);
-  const [pendingRegexOrigin, setPendingRegexOrigin] = useState<'ai' | 'rule'>('ai');
-  const autoDecisionRequestIdRef = useRef<string | null>(null);
+  const [aiPreviewCount, setAiPreviewCount] = useState(0);
+  const [smartPreview, setSmartPreview] = useState<{ count: number } | null>(null);
+  const [smartDerivedRegex, setSmartDerivedRegex] = useState<SmartHandoffState | null>(null);
 
-  // AI 模式状态
-  const [isLargeAiWarningOpen, setIsLargeAiWarningOpen] = useState(false);
-  const [pendingAiContinue, setPendingAiContinue] = useState<(() => void) | null>(null);
-
-  const regexParamsRef = useRef<RegexSubmitParams>({ findPattern: '', replacePattern: '' });
+  const modePayloadRef = useRef<unknown>(INITIAL_SMART_PAYLOAD);
+  const [footerPayload, setFooterPayload] = useState<unknown>(INITIAL_SMART_PAYLOAD);
+  const [smartInstructionDraft, setSmartInstructionDraft] = useState('');
 
   const [error, setError] = useState<string | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -69,6 +74,7 @@ function App(): React.JSX.Element {
     batchSize: settings.batchSize,
     concurrencyLimit: settings.concurrencyLimit
   });
+  const [isStrategyProcessing, setIsStrategyProcessing] = useState(false);
 
   const {
     files,
@@ -76,7 +82,6 @@ function App(): React.JSX.Element {
     targetMode,
     isScanDepthDialogOpen,
     scanDepthDialogFolderCount,
-    isRenaming,
     isApplying,
     isUndoing,
     hasChanges,
@@ -86,6 +91,7 @@ function App(): React.JSX.Element {
     reorderFiles,
     updateFileName,
     batchUpdateFileNames,
+    patchFileNames,
     clearFiles,
     discardChanges,
     revertFileName,
@@ -93,8 +99,6 @@ function App(): React.JSX.Element {
     scanDepthRootOnly,
     scanDepthRecursive,
     closeScanDepthDialog,
-    startRenaming,
-    stopRenaming,
     applyRename,
     resetAfterApply,
     undo
@@ -108,8 +112,33 @@ function App(): React.JSX.Element {
   const [pageIndex, setPageIndex] = useState<number>(0);
 
   // 是否处于审查模式（有待应用的更改）
-  const isReviewMode = hasChanges && !isRenaming && batchAI.status === 'idle';
-  const isSmartDecisionLoading = mode === 'smart' && aiSession === 'loading';
+  const isBatchCapableMode = mode === 'ai' || mode === 'smart';
+  const shouldBatchRun =
+    isBatchCapableMode &&
+    (settings.batchPolicy === 'force' ||
+      (settings.batchPolicy === 'auto' && files.length >= settings.batchThreshold));
+  const isAnyProcessing = batchAI.status === 'processing' || isStrategyProcessing;
+  const isReviewMode = hasChanges && !isAnyProcessing && batchAI.status === 'idle';
+  const effectiveSubmitMode: Mode =
+    mode === 'smart' && smartDerivedRegex && !shouldBatchRun ? 'regex' : mode;
+  const canSubmitToken = useMemo(
+    () => getModeSubmitInput(effectiveSubmitMode, footerPayload),
+    [effectiveSubmitMode, footerPayload]
+  );
+  const disableSubmitForReview = useMemo(
+    () => isReviewMode && canSubmitToken.length === 0,
+    [isReviewMode, canSubmitToken]
+  );
+  const footerStrategyUi = useMemo(
+    () => getModeById(effectiveSubmitMode).meta.ui,
+    [effectiveSubmitMode]
+  );
+  const footerReviewKind = useMemo(() => {
+    if (!isReviewMode) return 'none';
+    if (mode === 'ai') return 'ai-review';
+    if (mode === 'smart' && (smartPreview?.count ?? 0) > 0) return 'smart-review';
+    return 'plain-review';
+  }, [isReviewMode, mode, smartPreview]);
 
   const filesRef = useRef(files);
   useEffect(() => {
@@ -120,71 +149,85 @@ function App(): React.JSX.Element {
     .sort()
     .join('\u0000');
 
-  const handleRegexPreviewChange = useCallback(
-    (params: RegexSubmitParams) => {
-      regexParamsRef.current = params;
-      if (mode !== 'regex') return;
+  const computePreviewSafe = useCallback(
+    (currentFiles: FileItem[], currentMode: Mode, payload: unknown): string[] | null => {
+      if (currentMode === 'smart' && smartDerivedRegex && !shouldBatchRun) {
+        const regexPayload = normalizeModePayload('regex', payload, smartDerivedRegex);
+        return buildModePreview('regex', currentFiles, regexPayload);
+      }
+      return buildModePreview(currentMode, currentFiles, payload);
+    },
+    [smartDerivedRegex, shouldBatchRun]
+  );
 
+  const applyModePreview = useCallback(
+    (payload: unknown, origin: 'ai' | 'rule') => {
       const currentFiles = filesRef.current;
       if (currentFiles.length === 0) return;
-
-      const filenames = currentFiles.map((f) => f.original);
-      const newNames = computeRegexPreviewNames(filenames, params);
-      batchUpdateFileNames(newNames, 'rule');
+      const names = computePreviewSafe(currentFiles, mode, payload);
+      if (!names) return;
+      batchUpdateFileNames(names, origin);
     },
-    [mode, batchUpdateFileNames]
+    [mode, computePreviewSafe, batchUpdateFileNames]
   );
 
   useEffect(() => {
-    if (mode !== 'regex') return;
+    if (mode !== 'smart' || !shouldBatchRun || !smartDerivedRegex) return;
+    const restoredPayload = { instruction: smartInstructionDraft };
+    modePayloadRef.current = restoredPayload;
+    setFooterPayload(restoredPayload);
+    setSmartDerivedRegex(null);
+    setSmartPreview(null);
+  }, [mode, shouldBatchRun, smartDerivedRegex, smartInstructionDraft]);
 
-    const currentFiles = filesRef.current;
-    if (currentFiles.length === 0) return;
+  const handleModePayloadChange = useCallback(
+    (payload: unknown) => {
+      modePayloadRef.current = payload;
+      setFooterPayload(payload);
+      if (mode === 'smart' && !smartDerivedRegex) {
+        setSmartInstructionDraft(extractInstruction(payload));
+      }
+      applyModePreview(payload, 'rule');
+    },
+    [mode, smartDerivedRegex, applyModePreview]
+  );
 
-    const filenames = currentFiles.map((f) => f.original);
-    const newNames = computeRegexPreviewNames(filenames, regexParamsRef.current);
-    batchUpdateFileNames(newNames, 'rule');
-  }, [mode, stableOriginalNamesKey, batchUpdateFileNames]);
+  useEffect(() => {
+    applyModePreview(modePayloadRef.current, 'rule');
+  }, [mode, stableOriginalNamesKey, smartDerivedRegex, applyModePreview]);
 
   const [reorderNonce, setReorderNonce] = useState(0);
   const handleAfterReorder = useCallback(() => {
     setReorderNonce((prev) => prev + 1);
   }, []);
 
-  const recomputeIfMagicEnabledAfterReorder = useCallback(() => {
-    const preview = resolveReorderMagicPreview(mode, files, {
-      findPattern: regexParamsRef.current.findPattern,
-      replacePattern: regexParamsRef.current.replacePattern,
-      aiSession,
-      pendingDecision,
-      pendingRegexOrigin
-    });
-    if (!preview) return;
-    batchUpdateFileNames(preview.names, preview.origin);
-  }, [files, mode, batchUpdateFileNames, aiSession, pendingDecision, pendingRegexOrigin]);
+  const recomputeAfterReorder = useCallback(() => {
+    const names = computePreviewSafe(files, mode, modePayloadRef.current);
+    if (names) {
+      batchUpdateFileNames(names, 'rule');
+    }
+  }, [mode, files, computePreviewSafe, batchUpdateFileNames]);
 
   useEffect(() => {
     if (reorderNonce === 0) return;
-    recomputeIfMagicEnabledAfterReorder();
-  }, [reorderNonce, recomputeIfMagicEnabledAfterReorder]);
+    recomputeAfterReorder();
+  }, [reorderNonce, recomputeAfterReorder]);
 
   // 模式切换处理
   const handleModeChange = useCallback(
     (newMode: Mode) => {
       if (newMode === mode) return;
 
-      const autoDecisionRequestId = autoDecisionRequestIdRef.current;
-      if (autoDecisionRequestId) {
-        autoDecisionRequestIdRef.current = null;
-        void electronApi.cancelAI(autoDecisionRequestId).catch(() => undefined);
-      }
-
       // 切换时清空输入并重置预览
-      setPendingAiContinue(null);
-      setAISession('idle');
-      setPendingDecision(null);
-      setPendingRegexOrigin('ai');
-      regexParamsRef.current = { findPattern: '', replacePattern: '' };
+      setAiPreviewCount(0);
+      setSmartPreview(null);
+      setSmartDerivedRegex(null);
+      const nextPayload = getModeById(newMode).createInitialPayload();
+      modePayloadRef.current = nextPayload;
+      setFooterPayload(nextPayload);
+      if (newMode === 'smart') {
+        setSmartInstructionDraft(extractInstruction(nextPayload));
+      }
       discardChanges();
       setError(null);
 
@@ -231,10 +274,8 @@ function App(): React.JSX.Element {
     // UX: if we have preview changes (not applied yet), "undo" acts as "discard preview changes".
     if (!canUndo && hasChanges) {
       discardChanges();
-      if (aiSession === 'review') {
-        setPendingDecision(null);
-        setAISession('idle');
-      }
+      setAiPreviewCount(0);
+      setSmartPreview(null);
       showToast('已撤回预览更改', 'success');
       return;
     }
@@ -245,7 +286,7 @@ function App(): React.JSX.Element {
     } else {
       showToast(`撤销失败：${result.error}`, 'error');
     }
-  }, [aiSession, canUndo, discardChanges, hasChanges, isUndoing, undo, showToast]);
+  }, [canUndo, discardChanges, hasChanges, isUndoing, undo, showToast]);
   const handleUndoEvent = useEvent(handleUndo);
 
   const resolveApiKey = useCallback(async (): Promise<string | null> => {
@@ -276,273 +317,268 @@ function App(): React.JSX.Element {
     return { baseURL, model };
   }, [settings.baseUrl, settings.model]);
 
-  // AI 生成处理
-  const doRename = useCallback(
-    async (instructionText: string) => {
-      const trimmedInstruction = instructionText.trim();
-      if (mode !== 'ai') return;
-      if (
-        isRenaming ||
-        batchAI.status === 'processing' ||
-        files.length === 0 ||
-        !trimmedInstruction
-      ) {
-        return;
-      }
+  const resolveAIConfig = useCallback(async (): Promise<AIChatSettings> => {
+    const apiKeyToUse = await resolveApiKey();
+    if (!apiKeyToUse && settings.provider !== 'ollama') {
+      throw new Error('API Key 未配置，请先在设置中配置 API Key');
+    }
 
-      const apiKeyToUse = await resolveApiKey();
-      if (!apiKeyToUse && settings.provider !== 'ollama') return;
+    const envCfg = getConfigFromEnv();
+    const { baseURL, model } = resolveModelSettings();
 
-      setError(null);
-      addToHistory(trimmedInstruction);
-      try {
-        if (files.length > 20) {
-          const envCfg = getConfigFromEnv();
-          const { baseURL, model } = resolveModelSettings();
+    return {
+      provider: settings.provider,
+      apiKey: apiKeyToUse ?? '',
+      baseURL,
+      model,
+      jsonMode: envCfg.jsonMode,
+      maxTokens: envCfg.maxTokens
+    };
+  }, [resolveApiKey, resolveModelSettings, settings.provider]);
 
-          batchAI.start({
-            items: files.map((f) => ({ id: f.id, original: f.original })),
-            instruction: trimmedInstruction,
-            settings: {
-              provider: settings.provider,
-              apiKey: apiKeyToUse ?? '',
-              baseURL,
-              model,
-              jsonMode: envCfg.jsonMode,
-              maxTokens: envCfg.maxTokens
-            },
-            onBatchApplied: ({ items, resultNames }) => {
-              items.forEach((it, i) => updateFileName(it.id, resultNames[i] || '', 'ai'));
-            }
-          });
-        } else {
-          await startRenaming(trimmedInstruction, {
-            provider: settings.provider,
-            apiKey: apiKeyToUse ?? undefined,
-            baseURL: settings.baseUrl,
-            model: settings.model
-          });
-        }
-      } catch (err) {
-        const message = err instanceof Error ? err.message : '重命名失败，请重试';
-        setError(message);
-        console.error('重命名失败:', err);
-      }
+  const pushInstructionHistory = useCallback(
+    (payload: unknown): void => {
+      const instruction = extractInstruction(payload).trim();
+      if (!instruction) return;
+      addToHistory(instruction);
     },
-    [
-      mode,
-      isRenaming,
-      batchAI,
-      files,
-      settings,
-      startRenaming,
-      resolveApiKey,
-      resolveModelSettings,
-      addToHistory,
-      updateFileName
-    ]
+    [addToHistory]
   );
 
-  const handleRename = useCallback(
-    async (instructionText: string) => {
-      const nextInstruction = instructionText.trim();
-      if (mode !== 'ai') return;
-      if (isRenaming || batchAI.status === 'processing' || files.length === 0 || !nextInstruction) {
-        return;
-      }
+  const clearSubmittedInstruction = useCallback(
+    (payload: unknown): void => {
+      if (mode !== 'ai' && mode !== 'smart') return;
+      if (!extractInstruction(payload).trim()) return;
 
-      const snapshot = nextInstruction;
-
-      if (files.length > 50) {
-        setPendingAiContinue(() => () => void doRename(snapshot));
-        setIsLargeAiWarningOpen(true);
-        return;
-      }
-
-      await doRename(snapshot);
-    },
-    [mode, isRenaming, batchAI.status, files.length, doRename]
-  );
-
-  // Smart 模式：AI 决策引擎
-  const handleSmartRename = useCallback(
-    async (instructionText: string) => {
-      const nextInstruction = instructionText.trim();
-      if (
-        aiSession === 'loading' ||
-        batchAI.status === 'processing' ||
-        files.length === 0 ||
-        !nextInstruction
-      ) {
-        return;
-      }
-
-      const apiKeyToUse = await resolveApiKey();
-      if (!apiKeyToUse && settings.provider !== 'ollama') return;
-
-      // 记录指令到历史（在清空前）
-      addToHistory(nextInstruction);
-
-      // 立即反馈：清空输入框，设置 loading 状态
-      const requestId = `smart:decision:${Date.now()}:${Math.random().toString(16).slice(2)}`;
-      autoDecisionRequestIdRef.current = requestId;
-      setAISession('loading');
-      setError(null);
-
-      try {
-        // 调用 AI 获取决策
-        const fileNames = files.map((f) => f.original);
-        const decision = await generateAutoDecision(
-          fileNames,
-          nextInstruction,
-          {
-            provider: settings.provider,
-            apiKey: apiKeyToUse ?? undefined,
-            baseURL: settings.baseUrl,
-            model: settings.model
-          },
-          requestId
-        );
-
-        if (autoDecisionRequestIdRef.current !== requestId) return;
-        autoDecisionRequestIdRef.current = null;
-
-        if (decision.type === 'regex') {
-          // AI 决定使用正则：【不切换模式】，存入 pendingDecision，应用预览
-          setPendingDecision(decision);
-          setPendingRegexOrigin('ai');
-          // 应用正则预览
-          const newNames = computeRegexPreviewNames(fileNames, {
-            findPattern: decision.find,
-            replacePattern: decision.replace
-          });
-          batchUpdateFileNames(newNames, 'ai');
-          setAISession('review');
-        } else {
-          // AI 返回文件名列表
-          if (files.length > 20) {
-            // 文件超过样本数，需要完整 AI 处理（使用批处理）
-            setAISession('idle');
-
-            const envCfg = getConfigFromEnv();
-            const { baseURL, model } = resolveModelSettings();
-
-            batchAI.start({
-              items: files.map((f) => ({ id: f.id, original: f.original })),
-              instruction: nextInstruction,
-              settings: {
-                provider: settings.provider,
-                apiKey: apiKeyToUse ?? '',
-                baseURL,
-                model,
-                jsonMode: envCfg.jsonMode,
-                maxTokens: envCfg.maxTokens
-              },
-              onBatchApplied: ({ items, resultNames }) => {
-                items.forEach((it, i) => updateFileName(it.id, resultNames[i] || '', 'ai'));
-              }
-            });
-          } else {
-            // 文件数在样本范围内，直接使用返回结果
-            setPendingDecision(decision);
-            batchUpdateFileNames(decision.names, 'ai');
-            setAISession('review');
-          }
-        }
-      } catch (err) {
-        if (autoDecisionRequestIdRef.current !== requestId) return;
-        autoDecisionRequestIdRef.current = null;
-        const message = err instanceof Error ? err.message : 'AI 决策失败，请重试';
-        setError(message);
-        setAISession('idle');
-        console.error('Smart rename failed:', err);
+      const nextPayload = { instruction: '' };
+      modePayloadRef.current = nextPayload;
+      setFooterPayload(nextPayload);
+      if (mode === 'smart' && !smartDerivedRegex) {
+        setSmartInstructionDraft('');
       }
     },
-    [
-      aiSession,
-      batchAI,
-      files,
-      settings,
-      resolveApiKey,
-      resolveModelSettings,
-      batchUpdateFileNames,
-      addToHistory,
-      updateFileName
-    ]
+    [mode, smartDerivedRegex]
   );
 
   const handleGenerateByStrategy = useCallback(
     async (params?: unknown) => {
-      const runners: Record<'smart' | 'ai', (instruction: string) => Promise<void>> = {
-        smart: handleSmartRename,
-        ai: handleRename
-      };
+      if (files.length === 0 || isAnyProcessing || isApplying || isUndoing) return;
 
-      if (mode === 'regex') {
-        if (!params || typeof params !== 'object' || !('findPattern' in params)) {
-          showToast('正则参数无效', 'error');
-          return;
+      const submitPayload = params ?? modePayloadRef.current;
+
+      if (shouldBatchRun) {
+        setError(null);
+        try {
+          const aiConfig = await resolveAIConfig();
+          const strategy = getModeById(mode);
+          const normalizedPayload = normalizeModePayload(mode, submitPayload);
+          const validation = strategy.validateSubmit?.(normalizedPayload);
+          if (validation && !validation.valid) {
+            showToast(validation.error || '参数无效', 'error');
+            return;
+          }
+          clearSubmittedInstruction(submitPayload);
+          const executeBatchChunk = strategy.executeBatchChunk;
+          if (!executeBatchChunk) {
+            throw new Error(`${strategy.meta.label} 当前不支持分批执行`);
+          }
+
+          showToast(`正在分批处理 ${files.length} 个文件...`, 'success');
+          if (mode === 'smart') {
+            setSmartDerivedRegex(null);
+            setSmartPreview(null);
+          } else {
+            setSmartPreview(null);
+          }
+          setAiPreviewCount(0);
+
+          const filesSnapshot = files.map((file) => ({ ...file }));
+          const chunkContext = {
+            aiConfig,
+            batching: {
+              batchSize: settings.batchSize,
+              concurrencyLimit: settings.concurrencyLimit,
+              totalFiles: filesSnapshot.length
+            }
+          };
+
+          batchAI.start({
+            requestIdPrefix: `${mode}-batch`,
+            items: filesSnapshot.map((file) => ({ id: file.id, original: file.original })),
+            runChunk: async ({ batchIndex, start, startIndex, requestId, items, signal }) => {
+              if (signal.aborted) {
+                throw new Error('任务已取消');
+              }
+              const chunkFiles = filesSnapshot.slice(start, start + items.length);
+              const chunkResult = await executeBatchChunk(
+                chunkFiles,
+                normalizedPayload,
+                chunkContext,
+                {
+                  batchIndex,
+                  start,
+                  startIndex,
+                  requestId
+                }
+              );
+              if (signal.aborted) {
+                throw new Error('任务已取消');
+              }
+              return chunkResult.map((file) => file.renamed);
+            },
+            onBatchApplied: ({ start, resultNames }) => {
+              patchFileNames(start, resultNames, 'ai');
+            },
+            onCancelRequest: (requestId) => {
+              void electronApi.cancelAI(requestId);
+            }
+          });
+
+          pushInstructionHistory(submitPayload);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : '处理失败，请重试';
+          setError(message);
+          showToast(message, 'error');
+        }
+        return;
+      }
+
+      setIsStrategyProcessing(true);
+      setError(null);
+      try {
+        const strategyMode = effectiveSubmitMode;
+        let aiConfig: AIChatSettings | undefined;
+        if (strategyMode === 'ai' || strategyMode === 'smart') {
+          showToast(`正在处理 ${files.length} 个文件...`, 'success');
+          aiConfig = await resolveAIConfig();
         }
 
-        const regexParams = params as RegexSubmitParams;
+        clearSubmittedInstruction(submitPayload);
 
-        const result = await executeModeStrategy(mode, files, regexParams, runners);
+        if (mode === 'smart' && !smartDerivedRegex) {
+          setSmartPreview(null);
+        }
+        if (strategyMode === 'ai') {
+          setAiPreviewCount(0);
+        }
+
+        const result = await executeModeStrategy(strategyMode, files, submitPayload, {
+          aiConfig,
+          batching: {
+            batchSize: settings.batchSize,
+            concurrencyLimit: settings.concurrencyLimit
+          }
+        });
         if (!result.ok) {
           showToast(result.error, 'error');
           return;
         }
 
-        const nextNames = result.files.map((f) => f.renamed);
-        batchUpdateFileNames(nextNames, 'rule');
-        return;
-      }
+        const strategyResult = result.result;
+        if (strategyResult.type === 'regex-handoff') {
+          setSmartInstructionDraft(extractInstruction(modePayloadRef.current));
+          const regexPayload = {
+            findPattern: strategyResult.payload.find,
+            replacePattern: strategyResult.payload.replace
+          };
+          const handoffNames = buildModePreview('regex', files, regexPayload);
+          if (handoffNames) {
+            batchUpdateFileNames(handoffNames, 'rule');
+          }
+          modePayloadRef.current = regexPayload;
+          setFooterPayload(regexPayload);
+          setSmartDerivedRegex({
+            find: strategyResult.payload.find,
+            replace: strategyResult.payload.replace
+          });
+          setSmartPreview(null);
+          setAiPreviewCount(0);
+          pushInstructionHistory(submitPayload);
+          showToast('已生成正则规则，可在智能模式下继续微调', 'success');
+          return;
+        }
 
-      if (!params || typeof params !== 'object' || !('instruction' in params)) {
-        showToast('请输入指令', 'error');
-        return;
-      }
+        if (mode === 'smart' && strategyMode === 'smart') {
+          setSmartDerivedRegex(null);
+        }
+        const nextNames = strategyResult.files.map((f) => f.renamed);
+        batchUpdateFileNames(nextNames, strategyMode === 'regex' ? 'rule' : 'ai');
 
-      const textParams = params as TextSubmitParams;
+        if (mode === 'smart') {
+          setSmartPreview({ count: nextNames.length });
+          setAiPreviewCount(0);
+        } else if (strategyMode === 'ai') {
+          setAiPreviewCount(nextNames.length);
+          setSmartPreview(null);
+        } else {
+          setAiPreviewCount(0);
+          setSmartPreview(null);
+        }
 
-      const result = await executeModeStrategy(mode, files, textParams, runners);
-      if (!result.ok) {
-        showToast(result.error, 'error');
+        pushInstructionHistory(submitPayload);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : '处理失败，请重试';
+        setError(message);
+        showToast(message, 'error');
+      } finally {
+        setIsStrategyProcessing(false);
       }
     },
-    [mode, showToast, files, batchUpdateFileNames, handleSmartRename, handleRename]
+    [
+      mode,
+      effectiveSubmitMode,
+      shouldBatchRun,
+      smartDerivedRegex,
+      showToast,
+      files,
+      batchUpdateFileNames,
+      patchFileNames,
+      resolveAIConfig,
+      batchAI,
+      isAnyProcessing,
+      isApplying,
+      isUndoing,
+      settings.batchSize,
+      settings.concurrencyLimit,
+      clearSubmittedInstruction,
+      pushInstructionHistory
+    ]
   );
 
-  // 放弃 AI 决策
-  const handleDiscardDecision = useCallback(() => {
-    if (aiSession !== 'review') return;
-    discardChanges();
-    setPendingDecision(null);
-    setAISession('idle');
-  }, [aiSession, discardChanges]);
+  useEffect(() => {
+    if (!shouldBatchRun) return;
+    if (batchAI.status !== 'idle') return;
+    if (!hasChanges) return;
 
-  // 更新待定的正则规则（用于 Action Card 编辑）
-  const handleUpdatePendingRegex = useCallback(
-    (find: string, replace: string) => {
-      if (pendingDecision?.type !== 'regex') return;
-      setPendingDecision({ type: 'regex', find, replace });
-      setPendingRegexOrigin('rule');
-      // 实时预览
-      const fileNames = files.map((f) => f.original);
-      const newNames = computeRegexPreviewNames(fileNames, {
-        findPattern: find,
-        replacePattern: replace
-      });
-      batchUpdateFileNames(newNames, 'rule');
-      if (mode === 'regex') {
-        regexParamsRef.current = { findPattern: find, replacePattern: replace };
-      }
+    if (mode === 'smart') {
+      setSmartPreview({ count: files.length });
+      setAiPreviewCount(0);
+      return;
+    }
+
+    if (mode === 'ai') {
+      setAiPreviewCount(files.length);
+      setSmartPreview(null);
+    }
+  }, [shouldBatchRun, batchAI.status, hasChanges, mode, files.length]);
+
+  const footerController = useFooterController({
+    mode,
+    effectiveMode: effectiveSubmitMode,
+    payload: footerPayload,
+    onPayloadChange: handleModePayloadChange,
+    onModeChange: handleModeChange,
+    onGenerate: (payload) => {
+      void handleGenerateByStrategy(payload);
     },
-    [pendingDecision, files, batchUpdateFileNames, mode]
-  );
+    showToast
+  });
 
   // 放弃更改
   const handleDiscard = useCallback(() => {
     discardChanges();
+    setAiPreviewCount(0);
+    setSmartPreview(null);
   }, [discardChanges]);
 
   // 应用重命名
@@ -574,6 +610,8 @@ function App(): React.JSX.Element {
         });
         // 重置列表，准备下一轮
         resetAfterApply(result.renamed);
+        setAiPreviewCount(0);
+        setSmartPreview(null);
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : '应用失败，请重试';
@@ -583,35 +621,12 @@ function App(): React.JSX.Element {
     }
   }, [isApplying, hasChanges, applyRename, resetAfterApply, showToast, handleUndoEvent]);
 
-  // 确认应用 AI 决策
-  const handleConfirmDecision = useCallback(async () => {
-    if (aiSession !== 'review' || !pendingDecision) return;
-    await handleApply();
-    setPendingDecision(null);
-    setAISession('idle');
-  }, [aiSession, pendingDecision, handleApply]);
-
-  const handleGenerateRegexAssist = useCallback(
-    async (requirement: string): Promise<{ find: string; replace: string }> => {
-      const apiKeyToUse = await resolveApiKey();
-      if (!apiKeyToUse && settings.provider !== 'ollama') {
-        throw new Error('请先配置 API Key 以继续');
-      }
-
-      const { baseURL, model } = resolveModelSettings();
-
-      const envCfg = getConfigFromEnv();
-      return generateRegexFromDescription(requirement, {
-        provider: settings.provider,
-        apiKey: apiKeyToUse ?? '',
-        baseURL,
-        model,
-        jsonMode: envCfg.jsonMode,
-        maxTokens: envCfg.maxTokens
-      });
-    },
-    [settings.provider, resolveApiKey, resolveModelSettings]
-  );
+  useEffect(() => {
+    if (!hasChanges) {
+      setAiPreviewCount(0);
+      setSmartPreview(null);
+    }
+  }, [hasChanges]);
 
   const { isDragging, rootProps } = useFileDragOverlay(handleDrop);
 
@@ -654,21 +669,6 @@ function App(): React.JSX.Element {
           action={toast.action}
         />
       )}
-
-      <SmartWarningDialog
-        open={isLargeAiWarningOpen}
-        onClose={() => {
-          setPendingAiContinue(null);
-          setIsLargeAiWarningOpen(false);
-        }}
-        onContinue={() => {
-          const fn = pendingAiContinue;
-          setPendingAiContinue(null);
-          setIsLargeAiWarningOpen(false);
-          fn?.();
-        }}
-        onSwitchMode={handleModeChange}
-      />
 
       <ScanDepthDialog
         open={isScanDepthDialogOpen && targetMode === 'file'}
@@ -716,7 +716,7 @@ function App(): React.JSX.Element {
       {/* 表头 */}
       <AppHeader
         filesLength={files.length}
-        isRenaming={isRenaming || batchAI.status === 'processing'}
+        isProcessing={isAnyProcessing}
         hasChanges={hasChanges}
         targetMode={targetMode}
         resolvedTheme={resolvedTheme}
@@ -764,38 +764,43 @@ function App(): React.JSX.Element {
               onRemove={removeFile}
               reorderFiles={reorderFiles}
               onAfterReorder={handleAfterReorder}
-              isLoading={isRenaming || isSmartDecisionLoading}
-              isDisabled={
-                isRenaming ||
-                isSmartDecisionLoading ||
-                isApplying ||
-                isUndoing ||
-                batchAI.status === 'processing'
-              }
-              animatePreview={mode !== 'regex'}
+              isLoading={isAnyProcessing}
+              isDisabled={isAnyProcessing || isApplying || isUndoing}
+              animatePreview
             />
           </ScrollArea>
         </>
       )}
 
       <AppFooter
-        stableOriginalNamesKey={stableOriginalNamesKey}
         mode={mode}
+        effectiveMode={effectiveSubmitMode}
+        canSubmitToken={canSubmitToken}
+        disableSubmitForReview={disableSubmitForReview}
+        inputMinHeightClass={footerStrategyUi?.inputMinHeightClass ?? 'min-h-[44px]'}
+        submitTitle={footerStrategyUi?.submitTitle ?? '生成'}
+        showHistoryDrawer={footerStrategyUi?.showHistoryDrawer ?? false}
+        isSmartRegexPanel={mode === 'smart' && !!smartDerivedRegex && !shouldBatchRun}
+        CustomInput={footerController.CustomInput}
+        smartDerivedRegex={smartDerivedRegex}
+        onClearSmartDerivedRegex={() => {
+          const restoredPayload = { instruction: smartInstructionDraft };
+          modePayloadRef.current = restoredPayload;
+          setFooterPayload(restoredPayload);
+          setSmartDerivedRegex(null);
+          setSmartPreview(null);
+        }}
         onModeChange={handleModeChange}
         error={error}
         isEmpty={isEmpty}
         isReviewMode={isReviewMode}
-        isRenaming={isRenaming || batchAI.status === 'processing'}
+        reviewKind={footerReviewKind}
+        isProcessing={isAnyProcessing}
         isApplying={isApplying}
         isUndoing={isUndoing}
         canUndo={canUndo}
-        aiSession={aiSession}
-        pendingDecision={pendingDecision}
-        onConfirmDecision={() => void handleConfirmDecision()}
-        onDiscardDecision={handleDiscardDecision}
-        onUpdatePendingRegex={handleUpdatePendingRegex}
-        onGenerateRegexAssist={handleGenerateRegexAssist}
-        onRegexPreviewChange={handleRegexPreviewChange}
+        payload={footerPayload}
+        onPayloadChange={handleModePayloadChange}
         onUndo={() => void handleUndoEvent()}
         onDiscard={handleDiscard}
         onApply={() => void handleApply()}
@@ -805,20 +810,23 @@ function App(): React.JSX.Element {
             showToast('已取消任务', 'success');
             return;
           }
-          const autoDecisionRequestId = autoDecisionRequestIdRef.current;
-          if (aiSession === 'loading' && autoDecisionRequestId) {
-            autoDecisionRequestIdRef.current = null;
-            void electronApi.cancelAI(autoDecisionRequestId).catch(() => undefined);
-            setAISession('idle');
-            setPendingDecision(null);
-            showToast('已取消生成', 'success');
-            return;
+          if (isStrategyProcessing) {
+            showToast('当前任务处理中，请稍候...', 'error');
           }
-          stopRenaming();
         }}
-        onGenerate={(params) => void handleGenerateByStrategy(params)}
+        onPrimarySubmit={footerController.handlePrimarySubmit}
+        aiPreviewCount={aiPreviewCount}
+        smartPreviewCount={smartPreview?.count ?? 0}
+        getAIConfig={resolveAIConfig}
         showToast={showToast}
         history={history}
+        instruction={footerController.instruction}
+        inputRef={footerController.inputRef}
+        slashMenu={footerController.slashMenu}
+        savePresetInput={footerController.savePresetInput}
+        savePresetDialog={footerController.savePresetDialog}
+        onInstructionChange={footerController.handleInstructionChange}
+        onHistorySelect={footerController.handleHistorySelect}
       />
     </div>
   );

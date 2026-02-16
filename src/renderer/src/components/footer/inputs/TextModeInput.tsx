@@ -1,12 +1,30 @@
-import TextareaAutosize from 'react-textarea-autosize';
+﻿import TextareaAutosize from 'react-textarea-autosize';
 import { CommandMenu } from '@/components/CommandMenu';
 import { cn } from '@/lib/utils';
-import type { useSavePresetCommand } from '@/hooks/useSavePresetCommand';
-import type { useSlashPresetMenu } from '@/hooks/useSlashPresetMenu';
-import type { AISessionState } from '@/types/ai';
+import type { Preset } from '@/types/preset';
 
-type SavePresetController = ReturnType<typeof useSavePresetCommand>;
-type SlashMenuController = ReturnType<typeof useSlashPresetMenu>;
+export interface SavePresetInputController {
+  maybeOpenFromText: (
+    text: string,
+    onInstructionChange: (next: string) => void,
+    opts?: { onBeforeBegin?: () => void }
+  ) => boolean;
+  maybeOpenFromInstruction: (
+    instruction: string,
+    onInstructionChange: (next: string) => void,
+    opts?: { onBeforeBegin?: () => void }
+  ) => boolean;
+}
+
+export interface SlashMenuInputController {
+  isOpen: boolean;
+  filteredPresets: Preset[];
+  safeSelectedIndex: number;
+  setOpenForText: (text: string) => void;
+  close: () => void;
+  handleSelect: (preset: Preset) => void;
+  handleKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => boolean;
+}
 
 export function TextModeInput({
   isReviewMode,
@@ -14,26 +32,20 @@ export function TextModeInput({
   inputRef,
   isEmpty,
   isDisabled,
-  aiSession,
   slashMenu,
   savePreset,
   onInstructionChange,
-  onGenerate,
-  onConfirmDecision,
-  onDiscardDecision
+  onGenerate
 }: {
   isReviewMode: boolean;
   instruction: string;
   inputRef: React.RefObject<HTMLTextAreaElement | null>;
   isEmpty: boolean;
   isDisabled: boolean;
-  aiSession: AISessionState;
-  slashMenu: SlashMenuController;
-  savePreset: SavePresetController;
+  slashMenu: SlashMenuInputController;
+  savePreset: SavePresetInputController;
   onInstructionChange: (next: string) => void;
   onGenerate: () => void;
-  onConfirmDecision: () => void;
-  onDiscardDecision: () => void;
 }): React.JSX.Element {
   return (
     <>
@@ -81,13 +93,10 @@ export function TextModeInput({
               }
               if (instruction.trim()) onGenerate();
             }
-            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-              e.preventDefault();
-              if (aiSession === 'review') onConfirmDecision();
-            }
+
             if (e.key === 'Escape') {
               e.preventDefault();
-              if (aiSession === 'review') onDiscardDecision();
+              slashMenu.close();
             }
           }}
           disabled={isEmpty || isDisabled}

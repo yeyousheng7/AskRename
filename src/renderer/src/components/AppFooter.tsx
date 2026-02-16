@@ -1,196 +1,124 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { LoaderIcon, Undo2Icon } from 'lucide-react';
+﻿import { LoaderIcon, SparklesIcon, Undo2Icon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { HistoryDrawer } from '@/components/HistoryDrawer';
-import { usePresets } from '@/hooks/usePresets';
 import type { ToastType } from '@/hooks/useToast';
-import type { AISessionState, PendingDecision } from '@/types/ai';
 import type { Mode } from '@/types/mode';
 import { cn } from '@/lib/utils';
 import { FooterModeMenu } from '@/components/footer/ModeMenu';
 import { SavePresetDialog } from '@/components/footer/SavePresetDialog';
-import { FooterPendingDecisionCard } from '@/components/footer/PendingDecisionCard';
 import { FooterReviewActionsBar } from '@/components/footer/ReviewActionsBar';
 import { FooterSubmitControl } from '@/components/footer/SubmitControl';
-import { RegexModeInput } from '@/components/footer/inputs/RegexModeInput';
-import { TextModeInput } from '@/components/footer/inputs/TextModeInput';
-import { useSavePresetCommand } from '@/hooks/useSavePresetCommand';
-import { useSlashPresetMenu } from '@/hooks/useSlashPresetMenu';
-import type { RegexSubmitParams, TextSubmitParams } from '@renderer/types/types';
 import {
-  getFooterInputVariant,
-  getModeSubmitInput,
-  MODES,
-  resolveFooterReviewKind,
-  shouldDisableSubmitForReview
-} from '@/modes/registry';
+  TextModeInput,
+  type SavePresetInputController,
+  type SlashMenuInputController
+} from '@/components/footer/inputs/TextModeInput';
+import { AIReviewCard } from '@/components/review/AIReviewCard';
+import { FloatingPreviewBar } from '@/components/shared/FloatingPreviewBar';
+import type { FooterInputComponent } from '@/modes/contracts';
+import type { AIChatSettings } from '@shared/ipc-types';
+
+type FooterReviewKind = 'none' | 'ai-review' | 'smart-review' | 'plain-review';
+
+interface SavePresetDialogController {
+  isDialogOpen: boolean;
+  presetName: string;
+  setPresetName: (next: string) => void;
+  cancel: () => void;
+  confirm: () => void;
+}
 
 export function AppFooter({
-  stableOriginalNamesKey,
   mode,
+  effectiveMode,
+  canSubmitToken,
+  disableSubmitForReview,
+  inputMinHeightClass,
+  submitTitle,
+  showHistoryDrawer,
+  isSmartRegexPanel,
+  CustomInput,
+  smartDerivedRegex,
+  onClearSmartDerivedRegex,
   onModeChange,
   error,
   isEmpty,
   isReviewMode,
-  isRenaming,
+  reviewKind,
+  isProcessing,
   isApplying,
   isUndoing,
   canUndo,
-  aiSession,
-  pendingDecision,
-  onConfirmDecision,
-  onDiscardDecision,
-  onUpdatePendingRegex,
-  onGenerateRegexAssist,
-  onRegexPreviewChange,
+  payload,
+  onPayloadChange,
   onUndo,
   onDiscard,
   onApply,
   onStop,
-  onGenerate,
+  onPrimarySubmit,
+  aiPreviewCount,
+  smartPreviewCount,
+  getAIConfig,
   showToast,
-  history
+  history,
+  instruction,
+  inputRef,
+  slashMenu,
+  savePresetInput,
+  savePresetDialog,
+  onInstructionChange,
+  onHistorySelect
 }: {
-  stableOriginalNamesKey: string;
   mode: Mode;
+  effectiveMode: Mode;
+  canSubmitToken: string;
+  disableSubmitForReview: boolean;
+  inputMinHeightClass: string;
+  submitTitle: string;
+  showHistoryDrawer: boolean;
+  isSmartRegexPanel: boolean;
+  CustomInput: FooterInputComponent | null;
+  smartDerivedRegex: { find: string; replace: string } | null;
+  onClearSmartDerivedRegex: () => void;
   onModeChange: (mode: Mode) => void;
   error: string | null;
   isEmpty: boolean;
   isReviewMode: boolean;
-  isRenaming: boolean;
+  reviewKind: FooterReviewKind;
+  isProcessing: boolean;
   isApplying: boolean;
   isUndoing: boolean;
   canUndo: boolean;
-  aiSession: AISessionState;
-  pendingDecision: PendingDecision;
-  onConfirmDecision: () => void;
-  onDiscardDecision: () => void;
-  onUpdatePendingRegex: (find: string, replace: string) => void;
-  onGenerateRegexAssist: (requirement: string) => Promise<{ find: string; replace: string }>;
-  onRegexPreviewChange: (params: RegexSubmitParams) => void;
+  payload: unknown;
+  onPayloadChange: (payload: unknown) => void;
   onUndo: () => void;
   onDiscard: () => void;
   onApply: () => void;
   onStop: () => void;
-  onGenerate: (params: RegexSubmitParams | TextSubmitParams) => void;
+  onPrimarySubmit: () => void;
+  aiPreviewCount: number;
+  smartPreviewCount: number;
+  getAIConfig: () => Promise<AIChatSettings>;
   showToast: (message: string, type: ToastType) => void;
   history: string[];
+  instruction: string;
+  inputRef: React.RefObject<HTMLTextAreaElement | null>;
+  slashMenu: SlashMenuInputController;
+  savePresetInput: SavePresetInputController;
+  savePresetDialog: SavePresetDialogController;
+  onInstructionChange: (next: string) => void;
+  onHistorySelect: (text: string) => void;
 }): React.JSX.Element {
-  const { presets, addPreset } = usePresets();
-  const [instruction, setInstruction] = useState('');
-  const [findPattern, setFindPattern] = useState('');
-  const [replacePattern, setReplacePattern] = useState('');
-  const inputRef = useRef<HTMLTextAreaElement | null>(null);
-  const [isAIAssistMode, setIsAIAssistMode] = useState(false);
-  const [aiAssistText, setAiAssistText] = useState('');
-  const aiAssistInputRef = useRef<HTMLInputElement | null>(null);
-  const findInputRef = useRef<HTMLInputElement | null>(null);
-  const aiAssistRequestIdRef = useRef(0);
-  const [isAIAssistLoading, setIsAIAssistLoading] = useState(false);
-
-  const submitAIAssist = useCallback((): void => {
-    if (isAIAssistLoading) return;
-
-    const requirement = aiAssistText.trim();
-    if (!requirement) {
-      showToast('请先描述你的正则表达式需求', 'error');
-      return;
-    }
-
-    const requestId = (aiAssistRequestIdRef.current += 1);
-    setIsAIAssistLoading(true);
-
-    void (async () => {
-      try {
-        const result = await onGenerateRegexAssist(requirement);
-        if (aiAssistRequestIdRef.current !== requestId) return;
-
-        setFindPattern(result.find);
-        setReplacePattern(result.replace);
-        setIsAIAssistMode(false);
-        setAiAssistText('');
-        window.setTimeout(() => findInputRef.current?.focus(), 0);
-      } catch (err) {
-        if (aiAssistRequestIdRef.current !== requestId) return;
-        const message = err instanceof Error ? err.message : 'AI 生成正则失败，请重试';
-        showToast(message, 'error');
-      } finally {
-        if (aiAssistRequestIdRef.current === requestId) {
-          setIsAIAssistLoading(false);
-        }
-      }
-    })();
-  }, [aiAssistText, isAIAssistLoading, onGenerateRegexAssist, showToast]);
-
-  useEffect(() => {
-    if (mode !== 'regex') {
-      setIsAIAssistMode(false);
-      setAiAssistText('');
-      setIsAIAssistLoading(false);
-    }
-  }, [mode]);
-
-  useEffect(() => {
-    if (!isAIAssistMode) return;
-    const t = window.setTimeout(() => aiAssistInputRef.current?.focus(), 0);
-    return () => window.clearTimeout(t);
-  }, [isAIAssistMode]);
-
-  const slashMenu = useSlashPresetMenu({
-    instruction,
-    presets,
-    inputRef,
-    onModeChange,
-    onInstructionChange: setInstruction,
-    onFindPatternChange: setFindPattern,
-    onReplacePatternChange: setReplacePattern
-  });
-
-  const savePreset = useSavePresetCommand({ inputRef, addPreset, showToast });
-  const isDisabled = isRenaming || isApplying || isUndoing;
-  const strategyUi = MODES[mode].meta.ui;
-  const inputVariant = getFooterInputVariant(mode);
-  const canSubmit = getModeSubmitInput(mode, { instruction, findPattern });
-  const reviewKind = resolveFooterReviewKind({ mode, aiSession, isReviewMode, pendingDecision });
-  const disableSubmitForReview = shouldDisableSubmitForReview(mode, {
-    instruction,
-    isReviewMode
-  });
-
-  useEffect(() => {
-    setInstruction('');
-    setFindPattern('');
-    setReplacePattern('');
-  }, [mode]);
-
-  useEffect(() => {
-    if (mode !== 'regex') return;
-    onRegexPreviewChange({ findPattern, replacePattern });
-  }, [mode, findPattern, replacePattern, onRegexPreviewChange, stableOriginalNamesKey]);
-
-  const handlePrimarySubmit = (): void => {
-    if (
-      savePreset.maybeOpenFromInstruction(instruction, setInstruction, {
-        onBeforeBegin: slashMenu.close
-      })
-    ) {
-      return;
-    }
-    if (mode === 'regex') {
-      onGenerate({ findPattern, replacePattern });
-      return;
-    }
-    onGenerate({ instruction });
-  };
+  const isDisabled = isProcessing || isApplying || isUndoing;
 
   return (
     <>
       <SavePresetDialog
-        open={savePreset.isDialogOpen}
-        presetName={savePreset.presetName}
-        onPresetNameChange={savePreset.setPresetName}
-        onCancel={savePreset.cancel}
-        onConfirm={savePreset.confirm}
+        open={savePresetDialog.isDialogOpen}
+        presetName={savePresetDialog.presetName}
+        onPresetNameChange={savePresetDialog.setPresetName}
+        onCancel={savePresetDialog.cancel}
+        onConfirm={savePresetDialog.confirm}
       />
 
       <Button
@@ -226,15 +154,7 @@ export function AppFooter({
           'overflow-visible'
         )}
       >
-        {strategyUi?.showHistoryDrawer && (
-          <HistoryDrawer
-            history={history}
-            onSelect={(text) => {
-              setInstruction(text);
-              setTimeout(() => inputRef.current?.focus(), 50);
-            }}
-          />
-        )}
+        {showHistoryDrawer && <HistoryDrawer history={history} onSelect={onHistorySelect} />}
 
         {error && (
           <div className="px-4 pt-3 pb-0">
@@ -244,23 +164,27 @@ export function AppFooter({
           </div>
         )}
 
-        {reviewKind === 'smart-decision' && pendingDecision && (
-          <FooterPendingDecisionCard
-            pendingDecision={pendingDecision}
+        {reviewKind === 'ai-review' && (
+          <AIReviewCard
+            count={aiPreviewCount}
             isApplying={isApplying}
-            onUpdatePendingRegex={onUpdatePendingRegex}
-            onDiscardDecision={onDiscardDecision}
-            onConfirmDecision={onConfirmDecision}
+            onDiscard={onDiscard}
+            onApply={onApply}
           />
         )}
 
-        {reviewKind === 'ai-review' && (
-          <FooterPendingDecisionCard
-            pendingDecision={{ type: 'list', names: [] }}
-            isApplying={isApplying}
-            onUpdatePendingRegex={() => undefined}
-            onDiscardDecision={onDiscard}
-            onConfirmDecision={onApply}
+        {reviewKind === 'smart-review' && (
+          <FloatingPreviewBar
+            title="智能重命名预览"
+            icon={<SparklesIcon className="h-3.5 w-3.5" />}
+            content={
+              <div className="text-xs text-zinc-600 dark:text-zinc-300">
+                已根据指令生成 {smartPreviewCount} 个文件名
+              </div>
+            }
+            isLoading={isApplying}
+            onCancel={onDiscard}
+            onConfirm={onApply}
           />
         )}
 
@@ -273,6 +197,26 @@ export function AppFooter({
           />
         )}
 
+        {isSmartRegexPanel && smartDerivedRegex && (
+          <div className="px-4 pt-3 pb-0">
+            <div className="flex items-center justify-between rounded-lg bg-amber-50/80 dark:bg-amber-950/30 px-3 py-2">
+              <span className="text-xs text-amber-700 dark:text-amber-300">
+                AI 已生成正则规则，你仍在智能模式中
+              </span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-xs"
+                onClick={onClearSmartDerivedRegex}
+                disabled={isDisabled}
+              >
+                返回文本输入
+              </Button>
+            </div>
+          </div>
+        )}
+
         <div className="flex items-stretch">
           <FooterModeMenu mode={mode} onModeChange={onModeChange} disabled={isDisabled} />
 
@@ -280,34 +224,19 @@ export function AppFooter({
             className={cn(
               'flex-1 min-w-0 relative',
               'transition-all duration-300 ease-in-out',
-              strategyUi?.inputMinHeightClass ?? 'min-h-[44px]'
+              inputMinHeightClass
             )}
           >
-            {inputVariant === 'regex' ? (
-              <RegexModeInput
-                isAIAssistMode={isAIAssistMode}
-                aiAssistText={aiAssistText}
-                isAIAssistLoading={isAIAssistLoading}
+            {CustomInput ? (
+              <CustomInput
+                modeId={effectiveMode}
                 isDisabled={isDisabled}
                 isEmpty={isEmpty}
-                findPattern={findPattern}
-                replacePattern={replacePattern}
-                aiAssistInputRef={aiAssistInputRef}
-                findInputRef={findInputRef}
-                onAiAssistTextChange={setAiAssistText}
-                onFindPatternChange={setFindPattern}
-                onReplacePatternChange={setReplacePattern}
-                onSubmitAIAssist={submitAIAssist}
-                onOpenAIAssist={() => {
-                  setIsAIAssistMode(true);
-                  setAiAssistText('');
-                }}
-                onEscapeAIAssist={() => {
-                  aiAssistRequestIdRef.current += 1;
-                  setIsAIAssistLoading(false);
-                  setIsAIAssistMode(false);
-                  setAiAssistText('');
-                }}
+                payload={payload}
+                onPayloadChange={onPayloadChange}
+                onSubmit={onPrimarySubmit}
+                showToast={showToast}
+                getAIConfig={getAIConfig}
               />
             ) : (
               <TextModeInput
@@ -316,28 +245,24 @@ export function AppFooter({
                 inputRef={inputRef}
                 isEmpty={isEmpty}
                 isDisabled={isDisabled}
-                aiSession={aiSession}
                 slashMenu={slashMenu}
-                savePreset={savePreset}
-                onInstructionChange={setInstruction}
-                onGenerate={() => onGenerate({ instruction })}
-                onConfirmDecision={onConfirmDecision}
-                onDiscardDecision={onDiscardDecision}
+                savePreset={savePresetInput}
+                onInstructionChange={onInstructionChange}
+                onGenerate={onPrimarySubmit}
               />
             )}
           </div>
 
           <FooterSubmitControl
-            aiSession={aiSession}
             disableSubmitForReview={disableSubmitForReview}
-            isRenaming={isRenaming}
+            isProcessing={isProcessing}
             isApplying={isApplying}
             isEmpty={isEmpty}
             isDisabled={isDisabled}
-            canSubmit={canSubmit}
-            primaryTitle={strategyUi?.submitTitle ?? '生成'}
+            canSubmit={canSubmitToken}
+            primaryTitle={submitTitle}
             onStop={onStop}
-            onPrimary={handlePrimarySubmit}
+            onPrimary={onPrimarySubmit}
           />
         </div>
       </div>

@@ -1,36 +1,23 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { AIChatSettings, ChatMessage } from '@shared/ipc-types';
-import { electronApi } from '@/lib/electron-api';
-import { AI_SYSTEM_PROMPT } from '@/lib/ai-service';
+import {
+  buildBatchRequestId,
+  buildBatches,
+  clampInt,
+  summarizeBatchErrors,
+  type Batch,
+  type BatchAIStatus,
+  type BatchItem
+} from '@/modes/shared/batch-runner';
 
 const DEFAULT_BATCH_SIZE = 10;
 const DEFAULT_CONCURRENCY_LIMIT = 3;
 
 export type UseBatchAIOptions = {
-  /** 每批处理多少个文件名（>= 1） */
   batchSize?: number;
-  /** 并发批次数量上限（>= 1） */
   concurrencyLimit?: number;
 };
 
-export type BatchAIStatus = 'idle' | 'processing' | 'paused' | 'error';
-export type BatchStatus = 'pending' | 'in_flight' | 'success' | 'error' | 'canceled';
-
-export type BatchItem = { id: string; original: string };
-
-export type Batch = {
-  batchId: string;
-  batchIndex: number;
-  start: number;
-  end: number;
-  startIndex: number; // 1-based
-  items: BatchItem[];
-  status: BatchStatus;
-  attempts: number;
-  errorMessage?: string;
-  resultNames?: string[];
-  requestId?: string;
-};
+export type { Batch, BatchAIStatus, BatchItem };
 
 export type UseBatchAIResult = {
   status: BatchAIStatus;
@@ -41,13 +28,21 @@ export type UseBatchAIResult = {
   errorSummary?: string;
   start: (params: {
     items: BatchItem[];
-    instruction: string;
-    settings: AIChatSettings;
+    runChunk: (chunk: {
+      batchIndex: number;
+      start: number;
+      startIndex: number;
+      requestId: string;
+      items: BatchItem[];
+      signal: AbortSignal;
+    }) => Promise<string[]>;
     onBatchApplied: (batch: {
       start: number;
       items: { id: string }[];
       resultNames: string[];
     }) => void;
+    onCancelRequest?: (requestId: string) => void;
+    requestIdPrefix?: string;
   }) => void;
   cancel: () => void;
   retryBatch: (batchIndex: number) => void;
@@ -56,72 +51,12 @@ export type UseBatchAIResult = {
 
 type StartParams = Parameters<UseBatchAIResult['start']>[0];
 
-function clampInt(value: number, min: number, max: number, fallback: number): number {
-  const v = Math.floor(Number(value));
-  if (!Number.isFinite(v)) return fallback;
-  return Math.min(Math.max(v, min), max);
+function isTerminalStatus(status: Batch['status']): boolean {
+  return status === 'success' || status === 'error' || status === 'canceled';
 }
 
-function buildBatches(jobId: string, items: BatchItem[], batchSize: number): Batch[] {
-  const batches: Batch[] = [];
-  for (let start = 0, batchIndex = 0; start < items.length; start += batchSize, batchIndex++) {
-    const end = Math.min(start + batchSize, items.length);
-    batches.push({
-      batchId: `${jobId}:${batchIndex}`,
-      batchIndex,
-      start,
-      end,
-      startIndex: start + 1,
-      items: items.slice(start, end),
-      status: 'pending',
-      attempts: 0
-    });
-  }
-  return batches;
-}
-
-function parseNameList(content: string, expectedLength: number): string[] {
-  const cleaned = content
-    .replace(/^```(?:json)?\s*/i, '')
-    .replace(/\s*```$/i, '')
-    .trim();
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(cleaned);
-  } catch {
-    throw new Error(`AI 返回格式错误：无法解析 JSON。原始输出: ${content.slice(0, 100)}...`);
-  }
-  if (!Array.isArray(parsed)) {
-    throw new Error('AI 返回格式错误：必须是字符串数组');
-  }
-  if (parsed.length !== expectedLength) {
-    throw new Error(`AI 返回数量不匹配：${parsed.length} vs ${expectedLength}`);
-  }
-  return parsed.map((v, i) => {
-    if (typeof v !== 'string') throw new Error(`AI 返回格式错误：第 ${i + 1} 项不是字符串`);
-    return v;
-  });
-}
-
-function buildBatchMessages(
-  instruction: string,
-  originals: string[],
-  startIndex: number
-): ChatMessage[] {
-  const injectedSystem = `${AI_SYSTEM_PROMPT}\n\nCurrent batch starts at index ${startIndex}. If using sequential numbering, start from this number.`;
-  const userMessage = `文件列表：${JSON.stringify(originals)}\n\n修改指令：${instruction}`;
-  return [
-    { role: 'system', content: injectedSystem },
-    { role: 'user', content: userMessage }
-  ];
-}
-
-function summarizeErrors(batches: Batch[]): string | undefined {
-  const errors = batches
-    .filter((b) => b.status === 'error' && b.errorMessage)
-    .map((b) => `Batch ${b.batchIndex + 1}: ${b.errorMessage}`);
-  if (errors.length === 0) return undefined;
-  return errors.slice(0, 5).join('\n');
+function isProcessedStatus(status: Batch['status']): boolean {
+  return status === 'success' || status === 'error' || status === 'canceled';
 }
 
 export function useBatchAI(options?: UseBatchAIOptions): UseBatchAIResult {
@@ -147,9 +82,8 @@ export function useBatchAI(options?: UseBatchAIOptions): UseBatchAIResult {
   const [errorSummary, setErrorSummary] = useState<string | undefined>(undefined);
 
   const statusRef = useRef<BatchAIStatus>('idle');
-  const jobIdRef = useRef<string>('');
+  const jobIdRef = useRef('');
   const startParamsRef = useRef<StartParams | null>(null);
-  const haltSchedulingRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const schedulingRef = useRef(false);
   const batchesRef = useRef<Batch[]>([]);
@@ -161,13 +95,34 @@ export function useBatchAI(options?: UseBatchAIOptions): UseBatchAIResult {
   const setBatchesAndRefs = useCallback((next: Batch[]) => {
     batchesRef.current = next;
     setBatches(next);
-    setErrorSummary(summarizeErrors(next));
+    setCompletedFiles(
+      next.reduce((sum, batch) => {
+        return isProcessedStatus(batch.status) ? sum + batch.items.length : sum;
+      }, 0)
+    );
+    setErrorSummary(summarizeBatchErrors(next));
   }, []);
 
   const progressPercent = useMemo(() => {
     if (totalFiles === 0) return 0;
     return Math.round((completedFiles / totalFiles) * 100);
   }, [completedFiles, totalFiles]);
+
+  const finalizeIfSettled = useCallback((next: Batch[]) => {
+    if (statusRef.current !== 'processing') return;
+    const allSettled = next.every((batch) => isTerminalStatus(batch.status));
+    if (!allSettled) return;
+
+    const hasError = next.some((batch) => batch.status === 'error');
+    if (hasError) {
+      setStatus('error');
+      return;
+    }
+
+    setStatus('idle');
+    startParamsRef.current = null;
+    abortControllerRef.current = null;
+  }, []);
 
   const applyBatchSuccess = useCallback(
     (jobId: string, batchIndex: number, resultNames: string[]) => {
@@ -179,24 +134,16 @@ export function useBatchAI(options?: UseBatchAIOptions): UseBatchAIResult {
       if (!batch) return;
 
       const next = current.slice();
-      next[batchIndex] = { ...batch, status: 'success', resultNames, errorMessage: undefined };
+      next[batchIndex] = {
+        ...batch,
+        status: 'success',
+        resultNames,
+        errorMessage: undefined
+      };
       setBatchesAndRefs(next);
-      setCompletedFiles((prev) => prev + batch.items.length);
-
-      const allDone = next.every((b) => b.status === 'success' || b.status === 'canceled');
-      const hasError = next.some((b) => b.status === 'error');
-      const inFlightCount = next.filter((b) => b.status === 'in_flight').length;
-
-      if (allDone && !hasError) {
-        setStatus('idle');
-        haltSchedulingRef.current = false;
-        startParamsRef.current = null;
-        abortControllerRef.current = null;
-      } else if (haltSchedulingRef.current && inFlightCount === 0 && hasError) {
-        setStatus('error');
-      }
+      finalizeIfSettled(next);
     },
-    [setBatchesAndRefs]
+    [finalizeIfSettled, setBatchesAndRefs]
   );
 
   const applyBatchError = useCallback(
@@ -210,15 +157,9 @@ export function useBatchAI(options?: UseBatchAIOptions): UseBatchAIResult {
       const next = current.slice();
       next[batchIndex] = { ...batch, status: 'error', errorMessage: message };
       setBatchesAndRefs(next);
-
-      haltSchedulingRef.current = true;
-
-      const inFlightCount = next.filter((b) => b.status === 'in_flight').length;
-      if (inFlightCount === 0) {
-        setStatus('error');
-      }
+      finalizeIfSettled(next);
     },
-    [setBatchesAndRefs]
+    [finalizeIfSettled, setBatchesAndRefs]
   );
 
   const applyBatchCanceled = useCallback(
@@ -232,14 +173,9 @@ export function useBatchAI(options?: UseBatchAIOptions): UseBatchAIResult {
       const next = current.slice();
       next[batchIndex] = { ...batch, status: 'canceled', errorMessage: undefined };
       setBatchesAndRefs(next);
-
-      const inFlightCount = next.filter((b) => b.status === 'in_flight').length;
-      if (statusRef.current === 'paused' && inFlightCount === 0) {
-        startParamsRef.current = null;
-        abortControllerRef.current = null;
-      }
+      finalizeIfSettled(next);
     },
-    [setBatchesAndRefs]
+    [finalizeIfSettled, setBatchesAndRefs]
   );
 
   const runBatch = useCallback(
@@ -252,11 +188,18 @@ export function useBatchAI(options?: UseBatchAIOptions): UseBatchAIResult {
       if (!batch) return;
       if (batch.status !== 'in_flight') return;
 
-      const originals = batch.items.map((i) => i.original);
-      const messages = buildBatchMessages(params.instruction, originals, batch.startIndex);
+      const signal = abortControllerRef.current?.signal;
+      if (!signal) return;
 
       try {
-        const response = await electronApi.askAI(params.settings, messages, batch.requestId);
+        const names = await params.runChunk({
+          batchIndex: batch.batchIndex,
+          start: batch.start,
+          startIndex: batch.startIndex,
+          requestId: batch.requestId || '',
+          items: batch.items,
+          signal
+        });
 
         if (jobIdRef.current !== jobId) return;
         if (abortControllerRef.current?.signal.aborted) {
@@ -264,33 +207,24 @@ export function useBatchAI(options?: UseBatchAIOptions): UseBatchAIResult {
           return;
         }
 
-        if (!response.success) {
-          throw new Error(response.error || 'AI 服务发生未知错误');
-        }
-        if (!response.content) {
-          throw new Error('AI 返回内容为空');
-        }
-
-        const names = parseNameList(response.content, originals.length);
-
-        if (jobIdRef.current !== jobId) return;
-        if (abortControllerRef.current?.signal.aborted) {
-          applyBatchCanceled(jobId, batchIndex);
-          return;
+        if (!Array.isArray(names) || names.length !== batch.items.length) {
+          throw new Error(
+            `Batch ${batch.batchIndex + 1} 返回数量异常：${names?.length ?? 0} vs ${batch.items.length}`
+          );
         }
 
         params.onBatchApplied({
           start: batch.start,
-          items: batch.items.map((it) => ({ id: it.id })),
+          items: batch.items.map((item) => ({ id: item.id })),
           resultNames: names
         });
         applyBatchSuccess(jobId, batchIndex, names);
-      } catch (err) {
+      } catch (error) {
         if (abortControllerRef.current?.signal.aborted) {
           applyBatchCanceled(jobId, batchIndex);
           return;
         }
-        const message = err instanceof Error ? err.message : '批次处理失败';
+        const message = error instanceof Error ? error.message : '批次处理失败';
         applyBatchError(jobId, batchIndex, message);
       }
     },
@@ -300,12 +234,11 @@ export function useBatchAI(options?: UseBatchAIOptions): UseBatchAIResult {
   const schedule = useCallback(() => {
     if (schedulingRef.current) return;
     schedulingRef.current = true;
+
     try {
       if (statusRef.current !== 'processing') return;
-      if (haltSchedulingRef.current) return;
       if (abortControllerRef.current?.signal.aborted) return;
 
-      // loop-start: fill concurrency slots
       while (true) {
         const current = batchesRef.current;
         const inFlightCount = current.filter((b) => b.status === 'in_flight').length;
@@ -313,15 +246,20 @@ export function useBatchAI(options?: UseBatchAIOptions): UseBatchAIResult {
 
         const nextPendingIndex = current.findIndex((b) => b.status === 'pending');
         if (nextPendingIndex === -1) {
-          const hasError = current.some((b) => b.status === 'error');
-          const allDone = current.every((b) => b.status === 'success' || b.status === 'canceled');
-          if (allDone && !hasError) setStatus('idle');
+          finalizeIfSettled(current);
           return;
         }
 
+        const params = startParamsRef.current;
+        if (!params) return;
+
         const jobId = jobIdRef.current;
         const batch = current[nextPendingIndex];
-        const requestId = `ai:${jobId}:${batch.batchIndex}:${Date.now()}`;
+        const requestId = buildBatchRequestId(
+          params.requestIdPrefix || 'batch',
+          jobId,
+          batch.batchIndex
+        );
 
         const next = current.slice();
         next[nextPendingIndex] = {
@@ -336,10 +274,9 @@ export function useBatchAI(options?: UseBatchAIOptions): UseBatchAIResult {
         void runBatch(jobId, nextPendingIndex);
       }
     } finally {
-      // In case we returned early without launching a batch, release scheduling lock.
       schedulingRef.current = false;
     }
-  }, [concurrencyLimit, runBatch, setBatchesAndRefs]);
+  }, [concurrencyLimit, finalizeIfSettled, runBatch, setBatchesAndRefs]);
 
   useEffect(() => {
     if (status !== 'processing') return;
@@ -347,18 +284,21 @@ export function useBatchAI(options?: UseBatchAIOptions): UseBatchAIResult {
   }, [status, batches, schedule]);
 
   const start = useCallback<UseBatchAIResult['start']>(
-    ({ items, instruction, settings, onBatchApplied }) => {
-      // Start always overrides any existing job.
+    ({ items, runChunk, onBatchApplied, onCancelRequest, requestIdPrefix }) => {
       abortControllerRef.current?.abort();
-      haltSchedulingRef.current = false;
 
       const jobId = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
       jobIdRef.current = jobId;
       abortControllerRef.current = new AbortController();
-      startParamsRef.current = { items, instruction, settings, onBatchApplied };
+      startParamsRef.current = {
+        items,
+        runChunk,
+        onBatchApplied,
+        onCancelRequest,
+        requestIdPrefix
+      };
 
       setTotalFiles(items.length);
-      setCompletedFiles(0);
 
       const initial = buildBatches(jobId, items, batchSize);
       setBatchesAndRefs(initial);
@@ -371,33 +311,37 @@ export function useBatchAI(options?: UseBatchAIOptions): UseBatchAIResult {
   const cancel = useCallback(() => {
     if (statusRef.current === 'idle') return;
 
-    setStatus('paused');
-    haltSchedulingRef.current = true;
+    setStatus('idle');
     abortControllerRef.current?.abort();
 
+    const params = startParamsRef.current;
     const current = batchesRef.current;
-    const next: Batch[] = current.map((b): Batch => {
-      if (b.status === 'in_flight') {
-        if (b.requestId) void electronApi.cancelAI(b.requestId);
-        return { ...b, status: 'canceled' };
+    const next: Batch[] = current.map((batch) => {
+      if (batch.status === 'in_flight') {
+        if (params?.onCancelRequest && batch.requestId) {
+          params.onCancelRequest(batch.requestId);
+        }
+        return { ...batch, status: 'canceled' };
       }
-      if (b.status === 'pending') {
-        return { ...b, status: 'canceled' };
+      if (batch.status === 'pending') {
+        return { ...batch, status: 'canceled' };
       }
-      return b;
+      return batch;
     });
     setBatchesAndRefs(next);
+    startParamsRef.current = null;
+    abortControllerRef.current = null;
   }, [setBatchesAndRefs]);
 
   const retryBatch = useCallback(
     (batchIndex: number) => {
-      if (statusRef.current !== 'error' && statusRef.current !== 'paused') return;
+      if (statusRef.current !== 'error') return;
       if (batchIndex < 0 || batchIndex >= batchesRef.current.length) return;
       if (!startParamsRef.current) return;
 
       const current = batchesRef.current;
       const batch = current[batchIndex];
-      if (!batch) return;
+      if (!batch || batch.status !== 'error') return;
 
       const next = current.slice();
       next[batchIndex] = {
@@ -408,7 +352,6 @@ export function useBatchAI(options?: UseBatchAIOptions): UseBatchAIResult {
         requestId: undefined
       };
       setBatchesAndRefs(next);
-      haltSchedulingRef.current = false;
       if (!abortControllerRef.current || abortControllerRef.current.signal.aborted) {
         abortControllerRef.current = new AbortController();
       }
@@ -418,14 +361,14 @@ export function useBatchAI(options?: UseBatchAIOptions): UseBatchAIResult {
   );
 
   const retryFailed = useCallback(() => {
-    if (statusRef.current !== 'error' && statusRef.current !== 'paused') return;
+    if (statusRef.current !== 'error') return;
     if (!startParamsRef.current) return;
 
     const current = batchesRef.current;
-    const next: Batch[] = current.map((b): Batch => {
-      if (b.status !== 'error') return b;
+    const next: Batch[] = current.map((batch) => {
+      if (batch.status !== 'error') return batch;
       return {
-        ...b,
+        ...batch,
         status: 'pending',
         errorMessage: undefined,
         resultNames: undefined,
@@ -433,7 +376,6 @@ export function useBatchAI(options?: UseBatchAIOptions): UseBatchAIResult {
       };
     });
     setBatchesAndRefs(next);
-    haltSchedulingRef.current = false;
     if (!abortControllerRef.current || abortControllerRef.current.signal.aborted) {
       abortControllerRef.current = new AbortController();
     }
