@@ -1,4 +1,4 @@
-﻿import { PencilIcon, TrashIcon } from 'lucide-react';
+import { PencilIcon, TrashIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { Preset } from '@/types/preset';
 import { cn } from '@/lib/utils';

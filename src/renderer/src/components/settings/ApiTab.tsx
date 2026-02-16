@@ -131,7 +131,7 @@ export function ApiTab({
   );
 
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col gap-4">
       <div className={fieldGap}>
         <label className={labelClass}>供应商</label>
         <select
