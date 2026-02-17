@@ -4,7 +4,9 @@ node_modules/
 # Build output
 dist/
 out/
-build/
+build/*
+!build/icon.*
+!build/entitlements.mac.plist
 
 # Environment variables - NEVER COMMIT
 .env
