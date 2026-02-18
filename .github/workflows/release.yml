@@ -57,3 +57,5 @@ jobs:
         run: npx electron-builder --publish always
         env:
           GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+          ELECTRON_MIRROR: "https://github.com/electron/electron/releases/download/"
+          ELECTRON_BUILDER_BINARIES_MIRROR: "https://github.com/electron-userland/electron-builder-binaries/releases/download/"
