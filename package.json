@@ -1,6 +1,6 @@
 {
   "name": "ask-rename",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "AI-powered batch file renaming tool",
   "main": "./out/main/index.js",
   "author": "yeyousheng7",
