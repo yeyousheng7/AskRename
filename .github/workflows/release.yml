@@ -41,6 +41,10 @@ jobs:
         with:
           ref: ${{ env.RELEASE_TAG }}
 
+      - name: Remove .npmrc (Force official registry)
+              shell: bash
+              run: rm -f .npmrc
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -57,5 +61,6 @@ jobs:
         run: npx electron-builder --publish always
         env:
           GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
-          ELECTRON_MIRROR: "https://github.com/electron/electron/releases/download/"
-          ELECTRON_BUILDER_BINARIES_MIRROR: "https://github.com/electron-userland/electron-builder-binaries/releases/download/"
+          # 使用 npm_config_ 前缀，这比普通环境变量优先级更高，能覆盖残留配置
+          npm_config_electron_mirror: "https://github.com/electron/electron/releases/download/"
+          npm_config_electron_builder_binaries_mirror: "https://github.com/electron-userland/electron-builder-binaries/releases/download/"
